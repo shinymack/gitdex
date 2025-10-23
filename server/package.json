@@ -1,0 +1,26 @@
+{
+  "name": "server",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "scripts": {
+    "start": "bun index.js",
+    "dev" : "bun --watch index.js"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@dqbd/tiktoken": "^1.0.22",
+    "@google/genai": "^1.17.0",
+    "@octokit/rest": "^22.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "ioredis": "^5.8.1",
+    "mermaid": "^11.12.0"
+  }
+}
