@@ -8,7 +8,6 @@ import { useDocsStore } from '@/lib/docs-store';
 
 export default function StatusPage() {
   const params = useParams();
-  const router = useRouter();
   const { owner, repo } = params as { owner: string; repo: string };
 
   const [status, setStatus] = useState<'not-indexed' | 'indexing' | 'indexed' | 'error'>('not-indexed');

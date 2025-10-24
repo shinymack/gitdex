@@ -12,7 +12,7 @@ const PORT = process.env.PORT || 3001;
 
 // Middleware
 app.use(cors({
-  origin: ['https://gitdex-alpha.vercel.app', 'http://localhost:3000'], // Allow your frontend
+  origin: ['https://gitdex-alpha.vercel.app', 'http://localhost:3000'],
   credentials: true
 }));
 app.use(express.json());
@@ -38,6 +38,12 @@ app.use((req, res) => {
   res.status(404).json({ error: 'Route not found' });
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+// For Vercel, export the app
+export default app;
+
+// For local development
+if (process.env.NODE_ENV !== 'production') {
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+  });
+}

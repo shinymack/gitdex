@@ -1,6 +1,18 @@
 import Redis from "ioredis";
-const redis = new Redis(process.env.REDIS_URL);
-console.log("Redis Connected!!");
+
+// Use environment variable for Redis URL
+const redis = new Redis(process.env.REDIS_URL , {
+  // Add these options for serverless environments
+  retryDelayOnFailover: 100,
+  maxRetriesPerRequest: 3,
+  lazyConnect: true, // Important for serverless
+});
+
+redis.on('error', (err) => {
+  console.error('Redis Client Error:', err);
+});
+
+// Rest of your queue code remains the same
 class SimpleQueue {
   constructor() {
     this.processing = false;
