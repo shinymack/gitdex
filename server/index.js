@@ -3,7 +3,6 @@ import dotenv from "dotenv";
 import cors from "cors";
 import indexRoutes from "./routes/indexRoutes.js";
 import docsRoutes from "./routes/docsRoutes.js";
-import searchRoutes from "./routes/searchRoutes.js";
 
 dotenv.config();
 
@@ -20,7 +19,6 @@ app.use(express.json());
 // Routes
 app.use("/api", indexRoutes);
 app.use("/api", docsRoutes);
-app.use("/api", searchRoutes);
 
 // Health check
 app.get("/health", (req, res) => {
