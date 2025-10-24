@@ -1882,6 +1882,11 @@ ${mdxContent}`;
             }
         }
     }
+    console.log('ProcessRepository: All files uploaded, waiting for GitHub to process...');
+    await new Promise(resolve => setTimeout(resolve, 30000)); // 45 second delay
+
+    console.log('ProcessRepository: Delay completed, returning success response');
+
 
     return {
         message: `Indexing completed for ${repoUrl}`,

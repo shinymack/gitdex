@@ -26,9 +26,9 @@ export default async function Page({ params }: PageProps) {
     const firstPage = source.getFirstPage();
     
     if (firstPage) {
-      redirect(`/docs/${owner}/${repo}${firstPage.url}`);
+        redirect(`/docs/${owner}/${repo}${firstPage.url}`);
     } else {
-      notFound();
+        redirect(`/docs/${owner}/${repo}/status`);
     }
   }
   
