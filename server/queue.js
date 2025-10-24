@@ -8,6 +8,8 @@ const redis = new Redis(process.env.REDIS_URL , {
   lazyConnect: true, // Important for serverless
 });
 
+console.log('Redis Connected!')
+
 redis.on('error', (err) => {
   console.error('Redis Client Error:', err);
 });
