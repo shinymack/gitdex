@@ -68,5 +68,3 @@ gitdex/
    Ensure you have `GOOGLE_GENERATIVE_AI_API_KEY` and `GITHUB_TOKEN` configured in your environment.
 
 ---
-
-Built 
