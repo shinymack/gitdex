@@ -7,9 +7,9 @@ import { Input } from '@/src/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/src/components/ui/card';
 import { FloatingNav } from '@/src/components/navbar';
 import { ClientOnly } from '@/src/components/ClientOnly';
-import { ArrowRight, Zap, Code, Sparkles, Terminal, FileText, GitBranch, AlertCircle, Search } from 'lucide-react';
+import { ArrowRight, Zap, Code, Sparkles, Terminal, FileText, GitBranch, AlertCircle, Search, MessageSquare } from 'lucide-react';
 import { validateGitHubUrl } from '@/lib/validation';
-import MemoizedFaultyTerminal from '@/src/components/bg';
+import PixelSnow from '@/components/PixelSnow';
 
 interface RepoSuggestion {
   full_name: string;
@@ -26,6 +26,7 @@ export default function HomePage() {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const [isMobile, setIsMobile] = useState(false);
 
   // Debounced GitHub search via server-side Octokit proxy
   const searchRepos = useCallback(async (q: string) => {
@@ -57,6 +58,15 @@ export default function HomePage() {
     setDebounceTimer(timer);
     return () => clearTimeout(timer);
   }, [query, searchRepos]);
+
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   const handleSelectRepo = (repo: RepoSuggestion) => {
     setQuery(repo.full_name);
@@ -132,28 +142,22 @@ export default function HomePage() {
       {/* Background */}
       <div className="absolute inset-0 z-0">
         <ClientOnly>
-          <MemoizedFaultyTerminal
-            key="faulty-terminal-static"
-            scale={1.7}
-            gridMul={[2, 2]}
-            digitSize={2.9}
-            timeScale={1.2}
-            pause={false}
-            scanlineIntensity={1}
-            glitchAmount={1}
-            flickerAmount={0.5}
-            noiseAmp={0.8}
-            chromaticAberration={1}
-            dither={0}
-            curvature={0.2}
-            tint="#4caf50"
-            mouseReact={true}
-            mouseStrength={1}
-            pageLoadAnimation={true}
-            brightness={0.4}
-            className=""  // Add this
-            style={{}}
-          />
+          <div style={{ width: '100%', height: '100%', position: 'relative', backgroundColor: 'black' }}>
+            <PixelSnow
+              color="#31e000"
+              flakeSize={0.01}
+              minFlakeSize={1.25}
+              pixelResolution={500}
+              speed={isMobile ? 0.3 : 0.5}
+              depthFade={3}
+              farPlane={20}
+              brightness={0.9}
+              gamma={0.4545}
+              density={isMobile ? 0.25 : 0.45}
+              variant="square"
+              direction={95}
+            />
+          </div>
         </ClientOnly>
       </div>
 
@@ -162,7 +166,7 @@ export default function HomePage() {
         <main className="flex-1 flex items-center justify-center px-4 py-16">
           <div className="w-full max-w-4xl">
             {/* Hero Section */}
-            <div className="text-center mb-12">
+            <div className="text-center mb-12 mt-10 md:mt-0">
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-primary text-sm font-medium mb-6">
                 <Sparkles className="w-4 h-4" />
                 <span>AI-Powered Documentation</span>
@@ -271,13 +275,13 @@ export default function HomePage() {
               <Card className="bg-background/40 backdrop-blur-sm border-border/50 hover:bg-background/60 transition-all duration-300">
                 <CardHeader className="pb-3">
                   <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-green-500 to-green-600 flex items-center justify-center mb-3">
-                    <GitBranch className="w-5 h-5 text-white" />
+                    <MessageSquare className="w-5 h-5 text-white" />
                   </div>
-                  <CardTitle className="text-lg">Always Updated</CardTitle>
+                  <CardTitle className="text-lg">AI Code Assistant</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <CardDescription>
-                    Documentation stays in sync with your repository with automatic updates on every push
+                    Chat with your codebase to understand complex logic, ask questions, and get instant explanations from AI
                   </CardDescription>
                 </CardContent>
               </Card>

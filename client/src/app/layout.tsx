@@ -58,7 +58,7 @@ export default function RootLayout({
         >
           <RootProvider
             search={{
-              enabled: false,
+              enabled: false // We use our custom AI search instead
             }}>
             {children}
           </RootProvider>
