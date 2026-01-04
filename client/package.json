@@ -55,6 +55,7 @@
     "remark": "^15.0.1",
     "remark-gfm": "^4.0.1",
     "remark-rehype": "^11.1.2",
+    "sonner": "^2.0.7",
     "svg-pan-zoom": "^3.6.2",
     "svg-pan-zoom-container": "^0.6.1",
     "tailwind-merge": "^3.3.1",
