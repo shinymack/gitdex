@@ -15,6 +15,9 @@ interface PageProps {
   }>;
 }
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export default async function Page({ params }: PageProps) {
   // Await the params before using their properties
   const { owner, repo, slug = [] } = await params;

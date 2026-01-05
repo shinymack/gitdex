@@ -3,8 +3,10 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { RefreshCw, Check, AlertCircle, Loader2 } from 'lucide-react';
+import { toast } from "sonner";
 import { Button } from '@/src/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { useDocsStore } from '@/lib/docs-store';
 
 interface ReindexButtonProps {
   owner: string;
@@ -13,7 +15,7 @@ interface ReindexButtonProps {
 
 export function ReindexButton({ owner, repo }: ReindexButtonProps) {
   const router = useRouter();
-  const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'cooldown' | 'error'>('idle');
+  const [status, setStatus] = useState<'idle' | 'loading' | 'processing' | 'success' | 'cooldown' | 'error'>('idle');
   const [nextAvailable, setNextAvailable] = useState<number | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -47,35 +49,60 @@ export function ReindexButton({ owner, repo }: ReindexButtonProps) {
         const data = await res.json();
         setStatus('cooldown');
         setErrorMsg(data.error);
+        toast.error('Reindexing Rate Limited', {
+          description: "Please try again later. Cooldown is active."
+        });
         return;
       }
 
       if (!res.ok) throw new Error('Failed to start reindexing');
 
-      // Now poll for completion instead of redirecting
+      toast.info('Reindexing Started', {
+        description: "This may take a few minutes..."
+      });
+
+      const data = await res.json();
+      const jobId = data.jobId;
+
+      toast.info('Reindexing Started', {
+        description: "This may take a few minutes..."
+      });
+
+      // Now poll for completion of THIS specific job
       const pollInterval = setInterval(async () => {
         try {
-          const statusRes = await fetch(`/api/status?owner=${owner}&repo=${repo}`);
-          const statusData = await statusRes.json();
+          const statusRes = await fetch(`/api/status/${jobId}`);
+          const jobData = await statusRes.json();
 
-          if (statusData.indexed) {
+          if (jobData.status === 'completed') {
             clearInterval(pollInterval);
+
+            // Clear local cache to ensure fresh data fetch
+            useDocsStore.getState().clearCacheFor(owner, repo);
+
             setStatus('success');
+            toast.success('Reindexing Complete', {
+              description: "The documentation has been updated."
+            });
             // Refresh the current page to show new content
             router.refresh();
             setTimeout(() => setStatus('idle'), 2000);
-          } else if (statusData.job && statusData.job.status === 'failed') {
+          } else if (jobData.status === 'failed') {
             clearInterval(pollInterval);
             setStatus('error');
+            toast.error('Reindexing Failed', {
+              description: jobData.error || "An unknown error occurred."
+            });
             setTimeout(() => setStatus('idle'), 3000);
           }
         } catch (e) {
-          // ignore transient errors
+          // ignore transient polling errors
         }
       }, 2000);
 
     } catch (e) {
       setStatus('error');
+      toast.error('Failed to start', { description: "Could not connect to server." });
       setTimeout(() => setStatus('idle'), 3000);
     }
   };

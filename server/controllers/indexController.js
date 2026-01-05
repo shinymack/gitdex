@@ -44,29 +44,60 @@ async function deleteDirectoryRecursively(owner, repo, path) {
 }
 
 // Helper function for generation with timeout and retry
-async function generateWithRetry(prompt, retries = 5, timeoutMs = 5 * 60 * 1000) {
-    for (let attempt = 0; attempt < retries; attempt++) {
-        try {
-            const timeoutPromise = new Promise((_, reject) =>
-                setTimeout(() => reject(new Error(`Timeout after ${timeoutMs}ms`)), timeoutMs)
-            );
+// List of models to try in order
+const MODELS = [
+    'gemini-2.5-flash-lite',
+    'gemini-3-flash',
+    'gemini-2.5-flash'
+];
 
-            const result = await Promise.race([
-                ai.models.generateContent({
-                    model: 'gemini-2.5-flash-lite',
-                    contents: [prompt],
-                }),
-                timeoutPromise
-            ]);
+async function generateWithRetry(prompt, retries = 3, timeoutMs = 5 * 60 * 1000) {
+    let lastError;
 
+    // Iterate through models if we hit rate limits (429)
+    for (const model of MODELS) {
+        console.log(`Using model: ${model}`);
 
-            return result;
-        } catch (error) {
-            console.warn(`Generation attempt ${attempt + 1} failed for prompt:`, error.message);
-            if (attempt === retries - 1) throw error;
-            await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, attempt)));
+        // Standard retry loop for other errors (timeouts, 500s)
+        for (let attempt = 0; attempt < retries; attempt++) {
+            try {
+                const timeoutPromise = new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error(`Timeout after ${timeoutMs}ms`)), timeoutMs)
+                );
+
+                const result = await Promise.race([
+                    ai.models.generateContent({
+                        model: model,
+                        contents: [prompt],
+                    }),
+                    timeoutPromise
+                ]);
+
+                return result;
+            } catch (error) {
+                lastError = error;
+                const isRateLimit = error.message.includes('429') || error.status === 429;
+
+                if (isRateLimit) {
+                    console.warn(`Model ${model} hit rate limit (429). Switching to next model...`);
+                    // Break inner retry loop to try next model immediately
+                    break;
+                }
+
+                console.warn(`Generation attempt ${attempt + 1} failed for ${model} (Error: ${error.message})`);
+
+                if (attempt === retries - 1) {
+                    console.warn(`All retries failed for ${model}.`);
+                } else {
+                    // Exponential backoff for non-429 errors
+                    await new Promise(resolve => setTimeout(resolve, 2000 * Math.pow(2, attempt)));
+                }
+            }
         }
     }
+
+    // If we exhausted all models
+    throw new Error(`All models failed. Last error: ${lastError?.message}`);
 }
 
 // New generation function using Gemma 3 27B with strict rate limiting

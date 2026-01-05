@@ -36,6 +36,7 @@ import './globals.css';
 import { ThemeProvider } from 'next-themes';
 import { RootProvider } from 'fumadocs-ui/provider';
 import { MozillaHeadline, MozillaText } from './fonts';
+import { Toaster } from '@/components/ui/sonner';
 
 export const metadata: Metadata = {
   title: 'GitDex - AI-Powered Documentation for GitHub Repositories',
@@ -61,6 +62,7 @@ export default function RootLayout({
               enabled: false // We use our custom AI search instead
             }}>
             {children}
+            <Toaster />
           </RootProvider>
         </ThemeProvider>
       </body>

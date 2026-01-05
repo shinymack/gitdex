@@ -21,11 +21,37 @@ export async function POST(req: Request) {
 
         const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
 
+        // ... (previous setup keys/Octokit)
+
+        // 0. Fetch Repo Structure (Context Injection)
+        let fileTree = '';
+        try {
+            const { data: treeData } = await octokit.git.getTree({
+                owner,
+                repo,
+                tree_sha: 'HEAD',
+                recursive: 'true',
+            });
+
+            // Limit to top 200 files to save context, prioritize root and src
+            fileTree = treeData.tree
+                .filter(item => item.type === 'blob' || item.type === 'tree')
+                .map(item => item.path)
+                .slice(0, 300)
+                .join('\n');
+        } catch (e) {
+            console.error('API/Chat: Failed to fetch repo tree', e);
+            fileTree = '(File tree unavailable)';
+        }
+
         // Phase 1: Reasoning Step (Manual Loop)
         const systemPrompt = `
 You are an expert developer assistant for the repository ${owner}/${repo}.
 You have access to the codebase via tools.
 Your goal is to answer the user's question accurately by exploring the code.
+
+## Repository Structure (Top Files)
+${fileTree}
 
 ## Available Tools
 1. ACTION: LIST_FILES(path=".")
@@ -34,25 +60,24 @@ Your goal is to answer the user's question accurately by exploring the code.
    - Reads the content of a file.
 
 ## Rules
-1. If you need to explore the code, output ONLY the ACTION command.
-2. If you have enough information, just answer the user directly (do NOT use ACTION).
-3. Do NOT provide explanations "I will now list..." before the ACTION.
-4. When you receive an OBSERVATION, use it to reason about the next step.
+1. To use a tool, output ONLY the ACTION command. checking regex: /ACTION:\\s*[A-Z_]+\\(path="[^"]+"\\)/
+2. Use the provided "Repository Structure" to find the correct paths. Do NOT guess paths.
+3. If you have enough information, just answer the user directly (do NOT use ACTION).
+4. Do NOT provide explanations "I will now list..." before the ACTION.
+5. When you receive an OBSERVATION, use it to reason about the next step.
 
 ## Example Session
 User: What is in the src directory?
 Assistant: ACTION: LIST_FILES(path="src")
 User: OBSERVATION: [ "app", "components", "utils" ]
 Assistant: The src directory contains app, components, and utils.
-
-## Current Task
 `;
 
         // Normalize messages for SDK
         let currentMessages = await convertToModelMessages(messages);
 
         let step = 0;
-        const maxSteps = 5;
+        const maxSteps = 10;
 
         // Manual ReAct Loop
         while (step < maxSteps) {
@@ -68,9 +93,9 @@ Assistant: The src directory contains app, components, and utils.
             const responseText = reasoning.text.trim();
             console.log(`API/Chat: Step ${step + 1} Output:`, responseText);
 
-            // Check for ACTION patterns
-            const listFilesMatch = responseText.match(/ACTION:\s*LIST_FILES\(path="([^"]+)"\)/);
-            const readFileMatch = responseText.match(/ACTION:\s*READ_FILE\(path="([^"]+)"\)/);
+            // Check for ACTION patterns (Case insensitive, flexible spaces)
+            const listFilesMatch = responseText.match(/ACTION:\s*LIST_FILES\(path="([^"]+)"\)/i);
+            const readFileMatch = responseText.match(/ACTION:\s*READ_FILE\(path="([^"]+)"\)/i);
 
             if (listFilesMatch || readFileMatch) {
                 let toolResult = '';
@@ -95,7 +120,7 @@ Assistant: The src directory contains app, components, and utils.
                         const { data } = await octokit.repos.getContent({ owner, repo, path });
                         if ('content' in data && data.encoding === 'base64') {
                             const content = atob(data.content);
-                            toolResult = content.slice(0, 8000) + (content.length > 8000 ? '\n...[truncated]' : '');
+                            toolResult = content.slice(0, 15000) + (content.length > 15000 ? '\n...[truncated]' : '');
                         } else {
                             toolResult = 'Error: File not found or is binary.';
                         }
@@ -105,13 +130,6 @@ Assistant: The src directory contains app, components, and utils.
                 }
 
                 console.log(`API/Chat: ${toolName} Result Length: ${toolResult.length}`);
-
-                // usage of 'tool' role is specific to native tools, but here we can simulate 
-                // re-act history by just appending assistant reasoning + user observation
-
-                // Note: To keep history clean for the model, we append:
-                // 1. Assistant: ACTION: ...
-                // 2. User: OBSERVATION: ...
 
                 currentMessages.push({ role: 'assistant', content: responseText });
                 currentMessages.push({ role: 'user', content: `OBSERVATION from ${toolName}: ${toolResult}` });
@@ -126,15 +144,15 @@ Assistant: The src directory contains app, components, and utils.
 
         // Final Stream
         console.log('API/Chat: Streaming final response');
-        // We pass the Accumulated 'currentMessages' which contains the full chain of thought
         const result = streamText({
             model: google('gemma-3-27b-it'),
-            system: systemPrompt,
+            // Explicitly forbid tools in the final response to prevent leaks
+            system: systemPrompt + "\n\nCRITICAL: You are now answering the user. Do NOT use TOOLS. Just provide the final answer.",
             messages: currentMessages,
         });
 
+        // @ts-ignore
         return result.toUIMessageStreamResponse();
-
     } catch (error) {
         console.error('API/Chat: Internal Handler Error', error);
         return new Response('Internal Server Error', { status: 500 });
