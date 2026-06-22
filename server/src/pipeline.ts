@@ -28,10 +28,20 @@ async function triggerNextStep(jobId: string) {
 }
 
 export async function executeNextStep(jobId: string) {
-    const job = await queue.getJob(jobId);
-    if (!job || job.state !== 'processing') return;
+    const acquiredLock = await queue.acquireStepLock(jobId);
 
-    // ROBUST DATA PARSING: Handle string, object, or null
+    if (!acquiredLock) {
+        console.log(`[Pipeline] Step already in progress for ${jobId}. Skipping duplicate.`);
+        return;
+    }
+
+    const job = await queue.getJob(jobId);
+    if (!job || job.state !== 'processing') {
+        await queue.releaseStepLock(jobId);
+        return;
+    }
+
+    // Robust data parsing
     let data: PipelineData;
     if (job.data) {
         if (typeof job.data === 'string') {
@@ -41,32 +51,51 @@ export async function executeNextStep(jobId: string) {
                 data = { files: [], toc: [], generatedFiles: [], sectionsWritten: 0 };
             }
         } else {
-            // Upstash already parsed it into an object
             data = job.data as PipelineData;
         }
     } else {
         data = { files: [], toc: [], generatedFiles: [], sectionsWritten: 0 };
     }
 
+    let nextJobId: string | null = null;
+
+    // MAIN EXECUTION TRY/CATCH
     try {
         switch (job.currentStep) {
             case 0:
                 await scanRepository(job, data);
+                await triggerNextStep(job.id); // Trigger self for next step
                 break;
             case 1:
                 await planStructure(job, data);
+                await triggerNextStep(job.id);
                 break;
             case 2:
                 await writeSections(job, data);
+                await triggerNextStep(job.id);
                 break;
             case 3:
                 await commitToGithub(job, data);
+                nextJobId = await queue.completeJob(job.id); // Success! Get next job ID.
                 break;
         }
     } catch (error: any) {
         console.error(`Pipeline failed at step ${job.currentStep} for ${jobId}:`, error.message);
-        await queue.failJob(jobId, error.message);
-        // Do not re-throw here, we handle the failure gracefully.
+        nextJobId = await queue.failJob(jobId, error.message); // Fail current job, get next job ID
+    } finally {
+        await queue.releaseStepLock(jobId);
+    }
+
+    // SAFELY TRIGGER THE NEXT JOB (ISOLATED TRY/CATCH)
+    if (nextJobId) {
+        try {
+            console.log(`[Pipeline] Triggering next queued job: ${nextJobId}`);
+            await triggerNextStep(nextJobId);
+        } catch (e: any) {
+            // CRITICAL: If QStash is down, we must put the next job back in the queue!
+            console.error(`[Pipeline] CRITICAL: Failed to trigger next job ${nextJobId}! Re-queueing it.`, e.message);
+            await queue.requeueJob(nextJobId);
+        }
     }
 }
 
@@ -104,7 +133,6 @@ async function scanRepository(job: any, data: PipelineData) {
 
     data.files = files;
     await queue.updateJob(job.id, { currentStep: 1, data: JSON.stringify(data) });
-    await triggerNextStep(job.id);
 }
 
 async function planStructure(job: any, data: PipelineData) {
@@ -127,7 +155,6 @@ async function planStructure(job: any, data: PipelineData) {
     });
 
     await queue.updateJob(job.id, { currentStep: 2, data: JSON.stringify(data) });
-    await triggerNextStep(job.id);
 }
 
 async function writeSections(job: any, data: PipelineData) {
@@ -152,10 +179,22 @@ async function writeSections(job: any, data: PipelineData) {
     const prompt = `You are GitDex, an expert technical writer. Generate production-ready MDX documentation for ${job.owner}/${job.repo}.\nSection: ${entry.title}\nDescription: ${entry.description}\nCode Context:\n${contentBlock}\n\nSTRICT RULES: Valid MDX only. No frontmatter. Start with "# ${entry.title}". Include 1 Mermaid diagram if relevant (use graph TD, quoted nodes A["User"] --> B["API"], standard arrows). No images. Output ONLY the MDX body.`;
 
     let mdxContent = await generateWithRetry({ prompt });
-    mdxContent = mdxContent.replace(/```mdx/g, '').replace(/```mermaid/g, '\n\n```mermaid').trim();
-    if (mdxContent.startsWith('---')) {
-        const frontmatterEnd = mdxContent.indexOf('---', 3) + 3;
-        mdxContent = mdxContent.substring(frontmatterEnd).trim();
+
+    // Strip outer code fence wrapper if the model wrapped the entire response.
+    // No 'm' flag: ^ and $ must anchor to the entire string, not per-line,
+    // otherwise the regex matches and strips the first closing ``` in the content
+    // (e.g. the mermaid block's closing fence) instead of a trailing wrapper.
+    mdxContent = mdxContent
+        .replace(/^```(?:mdx|markdown|md)\n?/, '')
+        .replace(/\n?```\s*$/, '')
+        .trim();
+
+    // Strip ALL leading frontmatter blocks the model may have included,
+    // then prepend our own controlled frontmatter
+    while (mdxContent.startsWith('---')) {
+        const closeIndex = mdxContent.indexOf('---', 3);
+        if (closeIndex === -1) break;
+        mdxContent = mdxContent.slice(closeIndex + 3).trim();
     }
 
     const sidebarPosition = entry.prefix.endsWith('.') ? parseInt(entry.prefix.replace('.', '')) : parseFloat(entry.prefix);
@@ -169,7 +208,6 @@ async function writeSections(job: any, data: PipelineData) {
     } else {
         await queue.updateJob(job.id, { currentStep: 2, data: JSON.stringify(data) });
     }
-    await triggerNextStep(job.id);
 }
 
 async function commitToGithub(job: any, data: PipelineData) {
@@ -213,6 +251,4 @@ async function commitToGithub(job: any, data: PipelineData) {
         ref: 'heads/main',
         sha: newCommit.sha
     });
-
-    await queue.completeJob(job.id);
 }

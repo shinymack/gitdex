@@ -79,7 +79,7 @@ export function SyncingGuard({ owner, repo }: SyncingGuardProps) {
           <Link href="/">
             <Button variant="outline">Go Home</Button>
           </Link>
-          <Link href={`/docs/${owner}/${repo}/status`}>
+          <Link href={`/${owner}/${repo}/status`}>
             <Button>Start Indexing</Button>
           </Link>
         </div>
