@@ -18,7 +18,7 @@ export const AssistantModal = ({ owner, repo }: { owner: string; repo: string })
   });
 
   return (
-    <AssistantRuntimeProvider runtime={runtime}>
+    <AssistantRuntimeProvider runtime={runtime as any}>
       <AssistantModalPrimitive.Root>
         <AssistantModalPrimitive.Anchor className="fixed right-6 bottom-6 z-50">
           <AssistantModalPrimitive.Trigger asChild>
