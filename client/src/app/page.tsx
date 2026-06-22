@@ -2,14 +2,14 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
-import { Button } from '@/src/components/ui/button';
-import { Input } from '@/src/components/ui/input';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/src/components/ui/card';
-import { FloatingNav } from '@/src/components/navbar';
-import { ClientOnly } from '@/src/components/ClientOnly';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { FloatingNav } from '@/components/navbar';
+import { ClientOnly } from '@/components/ClientOnly';
 import { ArrowRight, Zap, Code, Sparkles, Terminal, FileText, GitBranch, AlertCircle, Search, MessageSquare } from 'lucide-react';
-import { validateGitHubUrl } from '@/lib/validation';
-import PixelSnow from '@/components/PixelSnow';
+import { validateGitHubUrl } from '../lib/validation';
+import PixelSnow from '../components/PixelSnow';
 
 interface RepoSuggestion {
   full_name: string;
@@ -96,7 +96,7 @@ export default function HomePage() {
       if (data.indexed) {
         window.location.href = data.path;
       } else {
-        window.location.href = `/docs/${owner}/${repo}/status`;
+        window.location.href = `/${owner}/${repo}/status`;
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to check status');
@@ -290,7 +290,7 @@ export default function HomePage() {
             {/* CTA Section */}
             <div className="text-center">
               <p className="text-muted-foreground mb-4">See it in action</p>
-              <Link href="/docs/shinymack/Chat-App-MERN">
+              <Link href="/shinymack/Chat-App-MERN">
                 <Button variant="outline" className="bg-background/40 backdrop-blur-sm border-border/50 hover:bg-background/60 gap-2 group">
                   <FileText className="w-4 h-4" />
                   View Example Documentation

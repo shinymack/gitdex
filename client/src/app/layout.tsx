@@ -1,36 +1,3 @@
-// import type { Metadata } from "next";
-// import "./globals.css";
-// import "nextra-theme-docs/style.css";
-// import { InterFont } from "./fonts";
-// import { RootProvider } from 'fumadocs-ui/provider';
-
-
-// export const metadata: Metadata = {
-//   title: 'GitDex - Documentation for GitHub Repositories',
-//   description: 'Generate and explore documentation for any GitHub repository',
-// };
-
-// export default function RootLayout({
-//   children,
-// }: {
-//   children: React.ReactNode;
-// }) {
-
-//   return (
-//     <html suppressHydrationWarning>
-//       <body className={`${InterFont} antialiased`}>
-//         <div className="min-h-screen bg-background font-sans antialiased">
-//           {/* <Navbar></Navbar> */}
-//           <div className="flex-1">
-//             <RootProvider>{children}</RootProvider>
-//           </div>
-//         </div>
-//       </body>
-//     </html>
-//   );
-// }
-
-// app/layout.tsx
 import type { Metadata } from 'next';
 import './globals.css';
 import { ThemeProvider } from 'next-themes';
@@ -59,7 +26,7 @@ export default function RootLayout({
         >
           <RootProvider
             search={{
-              enabled: false // We use our custom AI search instead
+              enabled: false 
             }}>
             {children}
             <Toaster />

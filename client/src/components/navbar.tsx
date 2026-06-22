@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Github, BookOpen, Menu, X } from 'lucide-react';
 import Link from 'next/link';
-import { Button } from '@/src/components/ui/button';
+import { Button } from '@/components/ui/button';
 
 export function FloatingNav() {
   const [mounted, setMounted] = useState(false);
