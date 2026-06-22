@@ -137,7 +137,8 @@ app.get("/api/dev/delete", async (req: Request, res: Response) => {
         const jobKey = `job:${owner}/${repo}`;
         const lockKey = `lock:${owner}/${repo}`;
         const stepLockKey = `lock:step:${jobKey}`;
-        await redis.del(jobKey, lockKey, stepLockKey);
+        const lastIndexedKey = `last_indexed:${owner}/${repo}`;
+        await redis.del(jobKey, lockKey, stepLockKey, lastIndexedKey);
 
         res.json({
             success: true,

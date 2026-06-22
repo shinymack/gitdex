@@ -1,5 +1,5 @@
 import type * as PageTree from 'fumadocs-core/page-tree';
-import { useDocsStore } from './docs-store';
+import { getGithubDocs } from './github';
 
 export interface Frontmatter {
     [key: string]: string | undefined;
@@ -35,8 +35,7 @@ export class DynamicDocsSource {
     }
 
     async initialize() {
-        const { getDocs } = useDocsStore.getState();
-        const docs = await getDocs(this.owner, this.repo);
+        const docs = await getGithubDocs(this.owner, this.repo);
 
         this.pages = docs.files
             .filter(file => file.path.endsWith('.mdx') && !file.path.includes('meta.json'))

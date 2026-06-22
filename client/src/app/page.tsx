@@ -93,8 +93,8 @@ export default function HomePage() {
       const res = await fetch(`/api/status?owner=${owner}&repo=${repo}`);
       const data = await res.json();
 
-      if (data.indexed) {
-        window.location.href = data.path;
+      if (data.indexed || data.lastIndexed) {
+        window.location.href = data.path || `/${owner}/${repo}`;
       } else {
         window.location.href = `/${owner}/${repo}/status`;
       }
@@ -290,7 +290,7 @@ export default function HomePage() {
             {/* CTA Section */}
             <div className="text-center">
               <p className="text-muted-foreground mb-4">See it in action</p>
-              <Link href="/shinymack/Chat-App-MERN">
+              <Link href="/shinymack/gitdex">
                 <Button variant="outline" className="bg-background/40 backdrop-blur-sm border-border/50 hover:bg-background/60 gap-2 group">
                   <FileText className="w-4 h-4" />
                   View Example Documentation

@@ -1,4 +1,4 @@
-import queue from "../queue.js";
+import queue, { redis } from "../queue.js";
 import { Octokit } from '@octokit/rest';
 import { Client } from "@upstash/qstash";
 
@@ -62,26 +62,63 @@ export const getStatusByName = async (req: any, res: any) => {
       return res.status(500).json({ error: "Server configuration error: missing GitHub owner" });
     }
     const docsRepo = process.env.DOCS_REPO_NAME || 'gitdex-docs';
-    
-    const job = await queue.getJobByRepo(owner, repo);
 
-    try {
-      await octokit.rest.repos.getContent({
-        owner: docsRepoOwner,
-        repo: docsRepo,
-        path: `docs/${owner}/${repo}/meta.json`,
+    const job = await queue.getJobByRepo(owner, repo);
+    const lastIndexedKey = `last_indexed:${owner}/${repo}`;
+
+    // Active job takes priority: never report indexed:true while a pipeline is running.
+    // The status page needs indexed:false to keep polling.
+    if (job && (job.state === 'processing' || job.state === 'queued')) {
+      const cached = await redis.get<string>(lastIndexedKey);
+      const { data, ...safeJob } = job;
+      return res.json({
+        indexed: false,
+        job: safeJob,
+        lastIndexed: cached ? parseInt(cached) : null,
       });
-      return res.json({ 
-        indexed: true, 
+    }
+
+    let lastIndexed: number | null = null;
+    const cached = await redis.get<string>(lastIndexedKey);
+    if (cached) {
+      lastIndexed = parseInt(cached);
+    } else {
+      // Cache miss: repo may have been indexed before this feature was added.
+      // First verify the file actually exists - listCommits returns delete commits too,
+      // so we cannot trust commit history alone to determine if the repo is indexed.
+      try {
+        await octokit.rest.repos.getContent({
+          owner: docsRepoOwner,
+          repo: docsRepo,
+          path: `docs/${owner}/${repo}/meta.json`,
+        });
+        // File exists - now get the commit timestamp to cache
+        const commits = await octokit.rest.repos.listCommits({
+          owner: docsRepoOwner,
+          repo: docsRepo,
+          path: `docs/${owner}/${repo}/meta.json`,
+          per_page: 1,
+        });
+        const commitDate = commits.data[0]?.commit.committer?.date;
+        if (commitDate) {
+          lastIndexed = new Date(commitDate).getTime();
+          await redis.set(lastIndexedKey, lastIndexed.toString());
+        }
+      } catch {
+        // 404 = not indexed, or GitHub unreachable
+      }
+    }
+
+    if (lastIndexed !== null) {
+      return res.json({
+        indexed: true,
         path: `/${owner}/${repo}`,
-        job: job ? { id: job.id, state: job.state, updatedAt: job.updatedAt } : null
+        lastIndexed,
+        job: job ? { id: job.id, state: job.state, updatedAt: job.updatedAt } : null,
       });
-    } catch (err) {
-      // Not found, fallthrough
     }
 
     if (job) {
-      // Omit the massive 'data' payload from the response
       const { data, ...safeJob } = job;
       return res.json({ indexed: false, job: safeJob });
     }

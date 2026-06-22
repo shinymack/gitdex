@@ -36,8 +36,12 @@ export function ReindexButton({ owner, repo }: ReindexButtonProps) {
         const res = await fetch(`/api/status?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}`);
         if (res.ok) {
           const data = await res.json();
-          if (data.job?.updatedAt) {
-            setLastIndexed(data.job.updatedAt);
+          if (data.lastIndexed) {
+            setLastIndexed(data.lastIndexed);
+          }
+          if (data.job?.state === 'processing' || data.job?.state === 'queued') {
+            const msg = data.job.state === 'queued' ? 'Queued for reindex' : 'Reindexing in progress';
+            toast.info(msg, { description: `${owner}/${repo} is being updated in the background.` });
           }
         }
       } catch (e) {
@@ -68,11 +72,17 @@ export function ReindexButton({ owner, repo }: ReindexButtonProps) {
 
       if (!res.ok) throw new Error(data.error || 'Failed to start reindexing');
 
+      if (!data.newlyStarted) {
+        setStatus('idle');
+        const msg = data.status === 'queued' ? 'Queued for reindex' : 'Reindexing in progress';
+        toast.info(msg, { description: `${owner}/${repo} is being updated in the background.` });
+        return;
+      }
+
       toast.success('Reindexing Started', {
         description: "The pipeline is running in the background."
       });
 
-      // Redirect to status page so user can watch it process
       router.push(`/${owner}/${repo}/status`);
 
     } catch (e: any) {

@@ -1,4 +1,4 @@
-import queue from "./queue.js";
+import queue, { redis } from "./queue.js";
 import { generateWithRetry } from "./ai.js";
 import { Octokit } from "@octokit/rest";
 import { encodingForModel } from "js-tiktoken";
@@ -222,7 +222,7 @@ async function commitToGithub(job: any, data: PipelineData) {
     if (!docsRepoOwner) throw new Error("Missing DOCS_REPO_OWNER or GITHUB_USERNAME env variable");
     const docsPath = `docs/${job.owner}/${job.repo}`;
 
-    const blobs: any[] = [{
+    const newBlobs: any[] = [{
         path: `${docsPath}/meta.json`,
         mode: '100644',
         type: 'blob',
@@ -230,17 +230,30 @@ async function commitToGithub(job: any, data: PipelineData) {
     }];
 
     for (const { filename, content } of data.generatedFiles) {
-        blobs.push({ path: `${docsPath}/${filename}`, mode: '100644', type: 'blob', content });
+        newBlobs.push({ path: `${docsPath}/${filename}`, mode: '100644', type: 'blob', content });
     }
 
     const { data: refData } = await octokit.rest.git.getRef({ owner: docsRepoOwner, repo: docsRepo, ref: 'heads/main' });
     const { data: commitData } = await octokit.rest.git.getCommit({ owner: docsRepoOwner, repo: docsRepo, commit_sha: refData.object.sha });
 
+    // Get the full current tree to find stale files under docsPath that need deleting.
+    const { data: currentTree } = await octokit.rest.git.getTree({
+        owner: docsRepoOwner,
+        repo: docsRepo,
+        tree_sha: commitData.tree.sha,
+        recursive: 'true',
+    });
+
+    const newBlobPaths = new Set(newBlobs.map(b => b.path));
+    const deletions: any[] = currentTree.tree
+        .filter(item => item.path?.startsWith(`${docsPath}/`) && item.type === 'blob' && !newBlobPaths.has(item.path!))
+        .map(item => ({ path: item.path, mode: '100644', type: 'blob', sha: null }));
+
     const { data: newTree } = await octokit.rest.git.createTree({
         owner: docsRepoOwner,
         repo: docsRepo,
         base_tree: commitData.tree.sha,
-        tree: blobs
+        tree: [...deletions, ...newBlobs]
     });
 
     const { data: newCommit } = await octokit.rest.git.createCommit({
@@ -257,4 +270,7 @@ async function commitToGithub(job: any, data: PipelineData) {
         ref: 'heads/main',
         sha: newCommit.sha
     });
+
+    await redis.set(`last_indexed:${job.owner}/${job.repo}`, Date.now().toString());
+    console.log(`[Pipeline] Wrote last_indexed timestamp for ${job.owner}/${job.repo}`);
 }

@@ -25,8 +25,7 @@ export function SyncingGuard({ owner, repo }: SyncingGuardProps) {
 
         const data = await res.json();
 
-        // If progress < 100 or status is 'scanned'/'processing', show skeletal loading
-        if (data.status === 'processing' || data.status === 'scanned' || data.status === 'queued') {
+        if (data.job?.state === 'processing' || data.job?.state === 'queued') {
           setStatus('indexing');
         } else if (data.indexed) {
           // It says indexed but we are in the guard? Maybe a race condition.
