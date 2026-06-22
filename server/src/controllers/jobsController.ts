@@ -1,4 +1,4 @@
-import queue from "../queue.ts";
+import queue from "../queue.js";
 import { Octokit } from '@octokit/rest';
 import { Client } from "@upstash/qstash";
 

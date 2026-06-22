@@ -1,6 +1,6 @@
 import express from "express";
-import { createJob, getJobStatus, getStatusByName } from "../controllers/jobsController.ts";
-import { executeNextStep } from "../pipeline.ts";
+import { createJob, getJobStatus, getStatusByName } from "../controllers/jobsController.js";
+import { executeNextStep } from "../pipeline.js";
 import { Receiver } from "@upstash/qstash";
 
 const router = express.Router();

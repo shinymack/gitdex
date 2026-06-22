@@ -1,11 +1,11 @@
-import queue from "./queue.ts";
-import { generateWithRetry } from "./ai.ts";
+import queue from "./queue.js";
+import { generateWithRetry } from "./ai.js";
 import { Octokit } from "@octokit/rest";
-import { encoding_for_model } from "@dqbd/tiktoken";
+import { encodingForModel } from "js-tiktoken";
 import { Client } from "@upstash/qstash";
 
 const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
-const tiktoken = encoding_for_model('gpt-4');
+const tiktoken = encodingForModel('gpt-4');
 
 const qstash = new Client({ token: process.env.QSTASH_TOKEN! });
 

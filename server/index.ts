@@ -2,7 +2,7 @@ import express, { Request, Response, NextFunction } from "express";
 import dotenv from "dotenv";
 import cors from "cors";
 import { Redis } from '@upstash/redis';
-import jobsRoutes from "./src/routes/jobsRoutes.ts";
+import jobsRoutes from "./src/routes/jobsRoutes.js";
 
 dotenv.config();
 
