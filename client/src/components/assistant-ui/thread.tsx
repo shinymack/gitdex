@@ -212,7 +212,7 @@ const AssistantMessage: FC = () => {
     >
       <div className="aui-assistant-message-content wrap-break-word px-2 text-foreground leading-relaxed">
         {/* Show a typing indicator if the AI is running but hasn't output anything yet */}
-        <AssistantIf condition={({ message }) => message.isRunning && message.content.length === 0}>
+        <AssistantIf condition={({ message }) => message.status?.type === "running" && message.content.length === 0}>
           <div className="flex items-center gap-2 text-muted-foreground text-sm py-1">
             <span className="flex gap-1">
               <span className="w-2 h-2 rounded-full bg-current animate-bounce [animation-delay:-0.3s]"></span>

@@ -16,11 +16,17 @@ export const createJob = async (req: any, res: any) => {
       const baseUrl = process.env.BASE_URL;
       if (!baseUrl) throw new Error("BASE_URL missing for QStash");
       
-      await qstash.publishJSON({
-        url: `${baseUrl}/api/pipeline/step`,
-        body: { jobId },
-        retries: 2,
-      });
+      try {
+        await qstash.publishJSON({
+          url: `${baseUrl}/api/pipeline/step`,
+          body: { jobId },
+          retries: 2,
+        });
+      } catch (qstashError: any) {
+        console.error(`[Queue] Failed to publish initial QStash step. Failing job: ${qstashError.message}`);
+        await queue.failJob(jobId, `QStash publish failed: ${qstashError.message}`);
+        throw qstashError;
+      }
     }
 
     res.json({ jobId, status: state, newlyStarted });
@@ -51,7 +57,10 @@ export const getStatusByName = async (req: any, res: any) => {
     const { owner, repo } = req.query;
     if (!owner || !repo) return res.status(400).json({ error: 'Missing owner or repo' });
 
-    const docsRepoOwner = process.env.DOCS_REPO_OWNER || process.env.GITHUB_USERNAME;
+    const docsRepoOwner = process.env.DOCS_REPO_OWNER || process.env.GITHUB_USERNAME || "";
+    if (!docsRepoOwner) {
+      return res.status(500).json({ error: "Server configuration error: missing GitHub owner" });
+    }
     const docsRepo = process.env.DOCS_REPO_NAME || 'gitdex-docs';
     
     const job = await queue.getJobByRepo(owner, repo);

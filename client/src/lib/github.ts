@@ -25,7 +25,11 @@ export async function getGithubDocs(owner: string, repo: string): Promise<DocsSt
                 headers['Authorization'] = `token ${token}`;
             }
 
-            const res = await fetch(`https://raw.githubusercontent.com/${docsRepoOwner}/${docsRepo}/${branch}/${path}`, { headers });
+            const url = `https://raw.githubusercontent.com/${docsRepoOwner}/${docsRepo}/${branch}/${path}?t=${Date.now()}`;
+            const res = await fetch(url, {
+                headers,
+                cache: 'no-store'
+            });
             if (!res.ok) return null;
             return res.text();
         };

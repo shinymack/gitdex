@@ -48,7 +48,7 @@ export default async function Page({ params }: PageProps) {
     if (firstPage) {
       redirect(`/${owner}/${repo}${firstPage.url}`);
     } else {
-      redirect(`/${owner}/${repo}/status`);
+      return <SyncingGuard owner={owner} repo={repo} />;
     }
   }
 

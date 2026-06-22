@@ -97,7 +97,7 @@ class SimpleQueue {
             error: null
         };
 
-        await redis.hset(jobId, jobData);
+        await redis.hset(jobId, jobData as any);
         await redis.set(lockKey, now.toString(), { ex: 3600 });
 
         // STRICT SERIALIZATION: Check if any job is currently processing
@@ -115,13 +115,13 @@ class SimpleQueue {
         }
     }
 
-    async getJob(jobId: string): Promise<JobData | null> {
+    async getJob(jobId: string, bypassSelfHealing = false): Promise<JobData | null> {
         const formattedId = jobId.startsWith('job:') ? jobId : `job:${jobId}`;
         const jobHash = await redis.hgetall(formattedId);
 
         if (!jobHash || Object.keys(jobHash).length === 0) return null;
 
-        return {
+        const job: JobData = {
             id: jobHash.id as string,
             state: jobHash.state as JobState,
             repoUrl: jobHash.repoUrl as string,
@@ -133,6 +133,33 @@ class SimpleQueue {
             currentStep: parseInt(jobHash.currentStep as string || '0'),
             data: jobHash.data as string || null
         };
+
+        // Self-healing: Fail stuck jobs (processing state only, active for > 3 minutes)
+        if (!bypassSelfHealing && job.state === 'processing' && (Date.now() - job.updatedAt > 3 * 60 * 1000)) {
+            console.log(`[Queue] Self-healing: Job ${job.id} has been stuck in state 'processing' since ${new Date(job.updatedAt).toISOString()}. Failing it now.`);
+            
+            // Mark job as failed directly in Redis to avoid recursion
+            job.state = 'failed';
+            job.error = "Job timed out during serverless execution.";
+            job.data = null;
+            job.updatedAt = Date.now();
+            await redis.hset(formattedId, job as any);
+            await redis.expire(formattedId, 86400);
+
+            // Clean up locks
+            const stepLockKey = `lock:step:${formattedId}`;
+            await redis.del(stepLockKey);
+            const repoLockKey = this.getLockKey(job.owner, job.repo);
+            await redis.del(repoLockKey);
+
+            // Trigger the next job in the queue if this was the active job
+            const activeJobId = await redis.get('system:active_job');
+            if (activeJobId === formattedId) {
+                await this.triggerNextJob();
+            }
+        }
+
+        return job;
     }
 
     async getJobByRepo(owner: string, repo: string): Promise<JobData | null> {
@@ -141,7 +168,7 @@ class SimpleQueue {
 
     async updateJob(jobId: string, updates: Partial<JobData>): Promise<void> {
         const formattedId = jobId.startsWith('job:') ? jobId : `job:${jobId}`;
-        const currentJob = await this.getJob(formattedId);
+        const currentJob = await this.getJob(formattedId, true);
         if (!currentJob) return;
 
         const updatedJob: JobData = {
@@ -150,7 +177,7 @@ class SimpleQueue {
             updatedAt: Date.now()
         };
 
-        await redis.hset(formattedId, updatedJob);
+        await redis.hset(formattedId, updatedJob as any);
     }
 
     private async triggerNextJob(): Promise<string | null> {
@@ -169,7 +196,7 @@ class SimpleQueue {
 
     async failJob(jobId: string, error: string): Promise<string | null> {
         const formattedId = jobId.startsWith('job:') ? jobId : `job:${jobId}`;
-        const job = await this.getJob(formattedId);
+        const job = await this.getJob(formattedId, true);
 
         if (job) {
             const lockKey = this.getLockKey(job.owner, job.repo);

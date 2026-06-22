@@ -27,7 +27,9 @@ export const ToolFallback: ToolCallMessagePartComponent = ({
         : JSON.stringify(status.error)
       : null;
 
-  const isRunning = status?.type !== "output-available" && !isCancelled;
+  const isRunning =
+    (status?.type === "running" || status?.type === "requires-action") &&
+    !isCancelled;
 
   return (
     <div

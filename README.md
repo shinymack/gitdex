@@ -1,70 +1,49 @@
 # GitDex
 
-**Transform any GitHub repository into beautiful, AI-powered interactive documentation in seconds.**
+Transform any GitHub repository into beautiful, AI-powered interactive documentation in seconds.
 
-GitDex leverages advanced AI to analyze your codebase, generate comprehensive documentation, and provide an interactive assistant that knows your project inside out.
-
----
-
-## ✨ Key Features
-
-- **🧠 Smart Analysis**: AI-powered code analysis that understands project structure and generates deep architectural insights.
-- **💬 AI Code Assistant**: A built-in chat interface that allows you to ask questions about the codebase, find where things are implemented, and understand complex logic.
-- **📊 Interactive Diagrams**: Auto-generated Mermaid diagrams for visualizing system architecture, workflows, and data flows with pan/zoom support.
-- **🔍 Seamless Integration**: Enter any `owner/repo` to instantly index and view documentation.
-- **⚡ Premium UI**: A fast, responsive documentation viewer built with Next.js, Fumadocs, and sleek modern aesthetics.
+GitDex analyzes your codebase structure, plans a table of contents, writes comprehensive markdown docs using LLMs, and presents it in a search-ready web reader with an interactive AI chat assistant.
 
 ---
 
-## 🛠️ Technology Stack
+## Key Features
 
-### Frontend
-- **Framework**: [Next.js (App Router)](https://nextjs.org/)
-- **Runtime**: [Bun](https://bun.sh/)
-- **Styling**: [Tailwind CSS](https://tailwindcss.com/)
-- **UI Components**: [assistant-ui](https://assistant-ui.com/), [Fumadocs](https://fumadocs.vercel.app/), [Lucide React](https://lucide.dev/)
-- **Data Fetching**: AI SDK with manual ReAct loop integration.
-
-### Backend
-- **Engine**: Node.js & Express
-- **AI Model**: Google Gemma-3 (via Google AI SDK)
-- **Tooling**: Octokit for GitHub API interaction.
-- **Processing**: BullMQ/Queue system for background repository indexing.
+* **Multi-Step Indexing**: High-performance pipeline that scans, plans, and writes documentation.
+* **AI Code Assistant**: Chat interface using manual ReAct loops to answer questions about the repository.
+* **Interactive Diagrams**: Automatic Mermaid diagram generation for visualizing codebase architecture.
+* **Serverless Queueing**: Custom-built queue system using Upstash Redis and QStash to bypass serverless execution timeouts.
 
 ---
 
-## 📂 Project Structure
+## How It Works
 
-```bash
-gitdex/
-├── client/          # Next.js frontend application
-│   ├── components/  # Core UI components (Chat, Modal, UI primitives)
-│   ├── src/app/     # App Router pages and API routes
-│   └── lib/         # Utility functions and stores
-└── server/          # Node.js backend & API
-    ├── controllers/ # Business logic for indexing and repos
-    ├── routes/      # API endpoints
-    └── queue.js     # Background job processing
+To support serverless timeout limits, the indexing workflow is decoupled into step-by-step executions orchestrated by QStash:
+
+```mermaid
+graph TD
+    A[User clicks Reindex] --> B[Create job in Redis]
+    B --> C[Step 0: Scan repository files]
+    C --> D[Step 1: Plan Table of Contents]
+    D --> E[Step 2: Generate MDX sections with delay]
+    E -- Loop sections --> E
+    E --> F[Step 3: Commit docs to GitHub and release locks]
 ```
 
 ---
 
-## 🚀 Getting Started
+## Project Structure
 
-1. **Clone the repo**
-2. **Setup Client**:
-   ```bash
-   cd client
-   bun install
-   bun dev
-   ```
-3. **Setup Server**:
-   ```bash
-   cd server
-   bun install
-   bun start
-   ```
-4. **Environment Variables**:
-   Ensure you have `GOOGLE_GENERATIVE_AI_API_KEY` and `GITHUB_TOKEN` configured in your environment.
+This repository is split into two packages:
+* **[Client](./client/README.md)**: Next.js frontend, Fumadocs reader, and assistant chat UI.
+* **[Server](./server/README.md)**: Express API backend, Redis queue, and Gemini pipeline handler.
+
+Refer to the links above for environment configuration and run instructions for each package.
 
 ---
+
+## Technology Stack
+
+* **Frontend**: Next.js, Tailwind CSS, Fumadocs, assistant-ui
+* **Backend**: Node.js, Express, Upstash Redis, Upstash QStash
+* **AI**: Google Gemini (via Google AI SDK)
+* **Integration**: Octokit (GitHub REST API)

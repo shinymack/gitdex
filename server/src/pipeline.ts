@@ -16,7 +16,7 @@ interface PipelineData {
     sectionsWritten: number;
 }
 
-async function triggerNextStep(jobId: string) {
+async function triggerNextStep(jobId: string, delay?: any) {
     const baseUrl = process.env.BASE_URL;
     if (!baseUrl) throw new Error("BASE_URL missing for QStash");
 
@@ -24,6 +24,7 @@ async function triggerNextStep(jobId: string) {
         url: `${baseUrl}/api/pipeline/step`,
         body: { jobId },
         retries: 2,
+        ...(delay ? { delay } : {})
     });
 }
 
@@ -72,7 +73,8 @@ export async function executeNextStep(jobId: string) {
                 break;
             case 2:
                 await writeSections(job, data);
-                await triggerNextStep(job.id);
+                const isFinished = data.sectionsWritten >= data.toc.length;
+                await triggerNextStep(job.id, isFinished ? undefined : "5s");
                 break;
             case 3:
                 await commitToGithub(job, data);
@@ -107,7 +109,7 @@ async function scanRepository(job: any, data: PipelineData) {
         owner: job.owner,
         repo: job.repo,
         tree_sha: repoData.default_branch,
-        recursive: true
+        recursive: 'true'
     });
 
     const relevantFiles = treeData.tree.filter((item: any) =>
@@ -127,7 +129,10 @@ async function scanRepository(job: any, data: PipelineData) {
                 path: file.path,
                 mediaType: { format: 'raw' },
             });
-            files.push({ path: file.path, content: fileResponse.data.toString('utf8') });
+            const rawContent = typeof fileResponse.data === 'string'
+                ? fileResponse.data
+                : (fileResponse.data as any).toString();
+            files.push({ path: file.path, content: rawContent });
         } catch (e) { /* skip */ }
     }
 
@@ -213,7 +218,8 @@ async function writeSections(job: any, data: PipelineData) {
 async function commitToGithub(job: any, data: PipelineData) {
     console.log(`[Pipeline] Step 3: Committing to GitHub for ${job.owner}/${job.repo}`);
     const docsRepo = process.env.DOCS_REPO_NAME || 'gitdex-docs';
-    const docsRepoOwner = process.env.DOCS_REPO_OWNER || process.env.GITHUB_USERNAME;
+    const docsRepoOwner = process.env.DOCS_REPO_OWNER || process.env.GITHUB_USERNAME || "";
+    if (!docsRepoOwner) throw new Error("Missing DOCS_REPO_OWNER or GITHUB_USERNAME env variable");
     const docsPath = `docs/${job.owner}/${job.repo}`;
 
     const blobs: any[] = [{
