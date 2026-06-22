@@ -29,13 +29,16 @@ class SimpleQueue {
         return `lock:${owner}/${repo}`;
     }
 
-    async addJob(repoUrl: string, force = false): Promise<{ jobId: string; state: JobState }> {
+    async addJob(repoUrl: string, force = false): Promise<{ jobId: string; state: JobState; newlyStarted: boolean }> {
         let owner: string, repo: string;
         try {
             const u = new URL(repoUrl);
             const parts = u.pathname.split('/').filter(Boolean);
-            owner = parts[0];
-            repo = parts[1].replace('.git', '');
+            const rawOwner = parts[0];
+            const rawRepo = parts[1];
+            if (!rawOwner || !rawRepo) throw new Error('Missing owner or repo in URL');
+            owner = rawOwner;
+            repo = rawRepo.replace('.git', '');
         } catch (e) {
             throw new Error("Invalid Repo URL");
         }
@@ -43,30 +46,41 @@ class SimpleQueue {
         const lockKey = this.getLockKey(owner, repo);
         const COOLDOWN_MS = 60 * 60 * 1000; // 1 Hour
 
-        const lastIndexed = await redis.get(lockKey);
+        // Layer 1: Redis lock key (set at job creation, 1h TTL)
+        const lastIndexed = await redis.get<string>(lockKey);
+        console.log(`[Queue] addJob ${owner}/${repo} | force=${force} | lockKey=${lockKey} | lastIndexed=${lastIndexed}`);
+
         if (lastIndexed && !force) {
-            const timePassed = Date.now() - parseInt(lastIndexed as string);
+            const timePassed = Date.now() - parseInt(lastIndexed);
             if (timePassed < COOLDOWN_MS) {
-                throw new Error(`Repository is in cooldown. Try again in ${Math.ceil((COOLDOWN_MS - timePassed) / 60000)} minutes.`);
+                const minutesLeft = Math.ceil((COOLDOWN_MS - timePassed) / 60000);
+                console.log(`[Queue] BLOCKED by lock key. ${minutesLeft}min remaining.`);
+                throw new Error(`Repository is in cooldown. Try again in ${minutesLeft} minutes.`);
             }
         }
 
         const jobId = this.getJobId(owner, repo);
 
+        // Layer 2: Job updatedAt timestamp (fallback if lock key was deleted)
         const existingJob = await this.getJob(jobId);
         if (existingJob) {
+            console.log(`[Queue] Existing job state=${existingJob.state} updatedAt=${new Date(existingJob.updatedAt).toISOString()}`);
+
             if (existingJob.state === 'processing' || existingJob.state === 'queued') {
-                return { jobId, state: existingJob.state };
+                console.log(`[Queue] BLOCKED - job already active (${existingJob.state})`);
+                return { jobId, state: existingJob.state, newlyStarted: false };
             }
-            // Fallback cooldown: even if the lock key was deleted (e.g. via /dev/clear),
-            // the job's updatedAt acts as a second layer. Job hash TTL is 24h > 1h cooldown.
+
             if (existingJob.state === 'completed' && !force) {
                 const timeSinceComplete = Date.now() - existingJob.updatedAt;
                 if (timeSinceComplete < COOLDOWN_MS) {
                     const minutesLeft = Math.ceil((COOLDOWN_MS - timeSinceComplete) / 60000);
+                    console.log(`[Queue] BLOCKED by updatedAt fallback. ${minutesLeft}min remaining.`);
                     throw new Error(`Repository is in cooldown. Try again in ${minutesLeft} minutes.`);
                 }
             }
+        } else {
+            console.log(`[Queue] No existing job found for ${jobId}`);
         }
 
         const now = Date.now();
@@ -93,11 +107,11 @@ class SimpleQueue {
             // No active job! Start immediately.
             await this.updateJob(jobId, { state: 'processing' });
             await redis.set('system:active_job', jobId);
-            return { jobId, state: 'processing' };
+            return { jobId, state: 'processing', newlyStarted: true };
         } else {
             // A job is already running. Add to queue list and wait.
             await redis.rpush('system:queue', jobId);
-            return { jobId, state: 'queued' };
+            return { jobId, state: 'queued', newlyStarted: true };
         }
     }
 

@@ -10,9 +10,9 @@ export const createJob = async (req: any, res: any) => {
     const { repoUrl, force } = req.body;
     if (!repoUrl) return res.status(400).json({ error: "Repo URL required" });
 
-    const { jobId, state } = await queue.addJob(repoUrl, force === true);
+    const { jobId, state, newlyStarted } = await queue.addJob(repoUrl, force === true);
     
-    if (state === 'processing') {
+    if (state === 'processing' && newlyStarted) {
       const baseUrl = process.env.BASE_URL;
       if (!baseUrl) throw new Error("BASE_URL missing for QStash");
       
@@ -23,7 +23,7 @@ export const createJob = async (req: any, res: any) => {
       });
     }
 
-    res.json({ jobId, status: state });
+    res.json({ jobId, status: state, newlyStarted });
   } catch (error: any) {
     if (error.message.includes('cooldown')) {
       return res.status(429).json({ error: error.message });
@@ -54,18 +54,23 @@ export const getStatusByName = async (req: any, res: any) => {
     const docsRepoOwner = process.env.DOCS_REPO_OWNER || process.env.GITHUB_USERNAME;
     const docsRepo = process.env.DOCS_REPO_NAME || 'gitdex-docs';
     
+    const job = await queue.getJobByRepo(owner, repo);
+
     try {
       await octokit.rest.repos.getContent({
         owner: docsRepoOwner,
         repo: docsRepo,
         path: `docs/${owner}/${repo}/meta.json`,
       });
-      return res.json({ indexed: true, path: `/${owner}/${repo}` });
+      return res.json({ 
+        indexed: true, 
+        path: `/${owner}/${repo}`,
+        job: job ? { id: job.id, state: job.state, updatedAt: job.updatedAt } : null
+      });
     } catch (err) {
       // Not found, fallthrough
     }
 
-    const job = await queue.getJobByRepo(owner, repo);
     if (job) {
       // Omit the massive 'data' payload from the response
       const { data, ...safeJob } = job;
