@@ -46,6 +46,19 @@ class SimpleQueue {
         const lockKey = this.getLockKey(owner, repo);
         const COOLDOWN_MS = 60 * 60 * 1000; // 1 Hour
 
+        const jobId = this.getJobId(owner, repo);
+        const existingJob = await this.getJob(jobId);
+
+        if (existingJob) {
+            console.log(`[Queue] Existing job state=${existingJob.state} updatedAt=${new Date(existingJob.updatedAt).toISOString()}`);
+            if (existingJob.state === 'processing' || existingJob.state === 'queued') {
+                console.log(`[Queue] BLOCKED - job already active (${existingJob.state})`);
+                return { jobId, state: existingJob.state, newlyStarted: false };
+            }
+        } else {
+            console.log(`[Queue] No existing job found for ${jobId}`);
+        }
+
         // Layer 1: Redis lock key (set at job creation, 1h TTL)
         const lastIndexed = await redis.get<string>(lockKey);
         console.log(`[Queue] addJob ${owner}/${repo} | force=${force} | lockKey=${lockKey} | lastIndexed=${lastIndexed}`);
@@ -59,28 +72,14 @@ class SimpleQueue {
             }
         }
 
-        const jobId = this.getJobId(owner, repo);
-
         // Layer 2: Job updatedAt timestamp (fallback if lock key was deleted)
-        const existingJob = await this.getJob(jobId);
-        if (existingJob) {
-            console.log(`[Queue] Existing job state=${existingJob.state} updatedAt=${new Date(existingJob.updatedAt).toISOString()}`);
-
-            if (existingJob.state === 'processing' || existingJob.state === 'queued') {
-                console.log(`[Queue] BLOCKED - job already active (${existingJob.state})`);
-                return { jobId, state: existingJob.state, newlyStarted: false };
+        if (existingJob && existingJob.state === 'completed' && !force) {
+            const timeSinceComplete = Date.now() - existingJob.updatedAt;
+            if (timeSinceComplete < COOLDOWN_MS) {
+                const minutesLeft = Math.ceil((COOLDOWN_MS - timeSinceComplete) / 60000);
+                console.log(`[Queue] BLOCKED by updatedAt fallback. ${minutesLeft}min remaining.`);
+                throw new Error(`Repository is in cooldown. Try again in ${minutesLeft} minutes.`);
             }
-
-            if (existingJob.state === 'completed' && !force) {
-                const timeSinceComplete = Date.now() - existingJob.updatedAt;
-                if (timeSinceComplete < COOLDOWN_MS) {
-                    const minutesLeft = Math.ceil((COOLDOWN_MS - timeSinceComplete) / 60000);
-                    console.log(`[Queue] BLOCKED by updatedAt fallback. ${minutesLeft}min remaining.`);
-                    throw new Error(`Repository is in cooldown. Try again in ${minutesLeft} minutes.`);
-                }
-            }
-        } else {
-            console.log(`[Queue] No existing job found for ${jobId}`);
         }
 
         const now = Date.now();
