@@ -51,15 +51,17 @@ ${fileTree}
 
 ## Rules
 1. Use tools to explore files before answering questions about code.
-2. Prefer reading actual files over guessing based on filenames.
-3. Keep answers concise and developer-focused.
-4. If you cannot find something after 2-3 tool uses, say so clearly.
+2. Prefer reading actual files over guessing. You can read up to 5 files at once using the "readFiles" tool. Use this whenever you need to search or check multiple files to save tool call turns.
+3. Prefer the batch "readFiles" tool over calling the single "readFile" tool multiple times.
+4. Keep answers concise and developer-focused.
+5. If you cannot find something after several tool uses, say so clearly.
 `;
 
         streamText({
-            model: google('gemma-4-31b-it'),
+            model: google('gemma-4-26b-a4b-it'),
             system: systemPrompt,
             messages: await convertToModelMessages(messages),
+            maxRetries: 5,
             tools: {
                 listFiles: tool({
                     description: 'List files and directories at a given path in the repository',
@@ -79,7 +81,7 @@ ${fileTree}
                     },
                 }),
                 readFile: tool({
-                    description: 'Read the content of a file in the repository',
+                    description: 'Read the content of a single file in the repository',
                     inputSchema: z.object({
                         path: z.string().describe('File path to read, e.g. "src/index.ts"'),
                     }),
@@ -96,8 +98,38 @@ ${fileTree}
                         }
                     },
                 }),
+                readFiles: tool({
+                    description: 'Read the content of multiple files in the repository (up to 5 files at once)',
+                    inputSchema: z.object({
+                        paths: z.array(z.string()).describe('List of file paths to read, e.g. ["src/index.ts", "src/utils.ts"]'),
+                    }),
+                    execute: async ({ paths }) => {
+                        try {
+                            const results = await Promise.all(
+                                paths.slice(0, 5).map(async (path) => {
+                                    try {
+                                        const { data } = await octokit.rest.repos.getContent({ owner, repo, path });
+                                        if ('content' in data && data.encoding === 'base64') {
+                                            const content = Buffer.from(data.content, 'base64').toString('utf-8');
+                                            return {
+                                                path,
+                                                content: content.slice(0, 10000) + (content.length > 10000 ? '\n...[truncated]' : ''),
+                                            };
+                                        }
+                                        return { path, error: 'File not found or is binary.' };
+                                    } catch (e: any) {
+                                        return { path, error: e.message };
+                                    }
+                                })
+                            );
+                            return { files: results };
+                        } catch (e: any) {
+                            return { error: e.message };
+                        }
+                    },
+                }),
             },
-            stopWhen: stepCountIs(10),
+            stopWhen: stepCountIs(20),
         }).pipeUIMessageStreamToResponse(res);
 
     } catch (error) {
