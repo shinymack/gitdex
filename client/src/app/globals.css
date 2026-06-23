@@ -244,3 +244,9 @@ html, body {
 .min-h-screen {
   min-height: 100vh;
 }
+
+/* Disable default assistant-ui dot.css loader as we use a custom pulsing primary glowing indicator */
+.aui-md[data-status="running"]::after,
+.aui-md[data-status="running"] > *::after {
+  content: none !important;
+}

@@ -9,6 +9,10 @@ import { Toaster } from '@/components/ui/sonner';
 export const metadata: Metadata = {
   title: 'GitDex - AI-Powered Documentation for GitHub Repositories',
   description: 'Transform any GitHub repository into beautiful, interactive documentation in seconds',
+  icons: {
+    icon: '/favicon.ico',
+    apple: '/icon.png',
+  },
 };
 
 export default function RootLayout({

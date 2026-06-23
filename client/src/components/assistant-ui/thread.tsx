@@ -31,7 +31,7 @@ import {
 } from "lucide-react";
 import type { FC } from "react";
 
-export const Thread: FC = () => {
+export const Thread: FC<{ owner?: string; repo?: string }> = ({ owner, repo }) => {
   return (
     <ThreadPrimitive.Root
       className="aui-root aui-thread-root @container flex flex-1 flex-col min-h-0 bg-background"
@@ -41,10 +41,10 @@ export const Thread: FC = () => {
     >
       <ThreadPrimitive.Viewport
         turnAnchor="top"
-        className="aui-thread-viewport relative flex flex-1 flex-col min-h-0 overflow-x-auto overflow-y-scroll scroll-smooth px-4 pt-4"
+        className="aui-thread-viewport relative flex-1 overflow-y-auto scroll-smooth px-4 pt-4"
       >
         <AssistantIf condition={({ thread }) => thread.isEmpty}>
-          <ThreadWelcome />
+          <ThreadWelcome owner={owner} repo={repo} />
         </AssistantIf>
 
         <ThreadPrimitive.Messages
@@ -54,12 +54,15 @@ export const Thread: FC = () => {
             AssistantMessage,
           }}
         />
+      </ThreadPrimitive.Viewport>
 
-        <ThreadPrimitive.ViewportFooter className="aui-thread-viewport-footer sticky bottom-0 mx-auto mt-auto flex w-full max-w-(--thread-max-width) flex-col gap-4 z-10 rounded-t-3xl bg-background pb-4 md:pb-6">
+      {/* Pin input area to the bottom */}
+      <div className="border-t border-border bg-background p-4 w-full shrink-0">
+        <div className="mx-auto w-full max-w-(--thread-max-width) relative flex flex-col">
           <ThreadScrollToBottom />
           <Composer />
-        </ThreadPrimitive.ViewportFooter>
-      </ThreadPrimitive.Viewport>
+        </div>
+      </div>
     </ThreadPrimitive.Root>
   );
 };
@@ -78,56 +81,68 @@ const ThreadScrollToBottom: FC = () => {
   );
 };
 
-const ThreadWelcome: FC = () => {
+const ThreadWelcome: FC<{ owner?: string; repo?: string }> = ({ owner, repo }) => {
+  const repoLabel = owner && repo ? `${owner}/${repo}` : 'this repository';
   return (
-    <div className="aui-thread-welcome-root mx-auto my-auto flex w-full max-w-(--thread-max-width) grow flex-col">
-      <div className="aui-thread-welcome-center flex w-full grow flex-col items-center justify-center">
-        <div className="aui-thread-welcome-message flex size-full flex-col justify-center px-4">
-          <h1 className="aui-thread-welcome-message-inner fade-in slide-in-from-bottom-1 animate-in font-semibold text-2xl duration-200">
-            Hello there!
-          </h1>
-          <p className="aui-thread-welcome-message-inner fade-in slide-in-from-bottom-1 animate-in text-muted-foreground text-xl delay-75 duration-200">
-            How can I help you today?
-          </p>
-        </div>
+    <div className="aui-thread-welcome-root mx-auto my-auto flex w-full max-w-(--thread-max-width) flex-col justify-center gap-8 py-10 px-2 min-h-[65vh]">
+      <div className="aui-thread-welcome-message flex flex-col gap-2">
+        <h1 className="aui-thread-welcome-message-inner fade-in slide-in-from-bottom-1 animate-in font-semibold text-2xl tracking-tight duration-200">
+          Ask me anything about
+        </h1>
+        <p className="aui-thread-welcome-message-inner fade-in slide-in-from-bottom-1 animate-in text-primary font-mono text-lg font-semibold tracking-wide delay-75 duration-200">
+          {repoLabel}
+        </p>
+        <p className="aui-thread-welcome-message-inner fade-in slide-in-from-bottom-1 animate-in text-muted-foreground text-sm mt-1 delay-100 duration-200">
+          I can read files and explore the codebase to answer your questions.
+        </p>
       </div>
-      <ThreadSuggestions />
+      <div className="flex flex-col gap-3">
+        <span className="text-xs font-semibold text-muted-foreground/60 uppercase tracking-wider px-1">
+          Suggested Prompts
+        </span>
+        <ThreadSuggestions />
+      </div>
     </div>
   );
 };
 
 const SUGGESTIONS: { title: string; label: string; prompt: string }[] = [
-  // {
-  //   title: "What's the weather",
-  //   label: "in San Francisco?",
-  //   prompt: "What's the weather in San Francisco?",
-  // },
-  // {
-  //   title: "Explain React hooks",
-  //   label: "like useState and useEffect",
-  //   prompt: "Explain React hooks like useState and useEffect",
-  // },
+  {
+    title: "Explain the architecture",
+    label: "overview of structure & components",
+    prompt: "Give me an overview of this repository's architecture and main components.",
+  },
+  {
+    title: "Show me the API routes",
+    label: "list all endpoints",
+    prompt: "What are all the API routes or endpoints defined in this codebase and what do they do?",
+  },
+  {
+    title: "How does auth work?",
+    label: "find authentication code",
+    prompt: "How does authentication and authorization work in this codebase?",
+  },
 ];
 
 const ThreadSuggestions: FC = () => {
   return (
-    <div className="aui-thread-welcome-suggestions grid w-full @md:grid-cols-2 gap-2 pb-4">
+    <div className="aui-thread-welcome-suggestions flex flex-col gap-2 pb-4 w-full">
       {SUGGESTIONS.map((suggestion, index) => (
         <div
           key={suggestion.prompt}
-          className="aui-thread-welcome-suggestion-display fade-in slide-in-from-bottom-2 @md:nth-[n+3]:block nth-[n+3]:hidden animate-in fill-mode-both duration-200"
+          className="aui-thread-welcome-suggestion-display w-full fade-in slide-in-from-bottom-2 animate-in fill-mode-both duration-200"
           style={{ animationDelay: `${100 + index * 50}ms` }}
         >
           <ThreadPrimitive.Suggestion prompt={suggestion.prompt} send asChild>
             <Button
-              variant="ghost"
-              className="aui-thread-welcome-suggestion h-auto w-full @md:flex-col flex-wrap items-start justify-start gap-1 rounded-2xl border px-4 py-3 text-left text-sm transition-colors hover:bg-muted"
+              variant="outline"
+              className="aui-thread-welcome-suggestion h-auto w-full flex flex-col items-start justify-center gap-1 rounded-xl px-4 py-3 text-left transition-colors hover:bg-muted/50 border border-border/80 bg-card/40"
               aria-label={suggestion.prompt}
             >
-              <span className="aui-thread-welcome-suggestion-text-1 font-medium">
+              <span className="aui-thread-welcome-suggestion-text-1 font-semibold text-sm text-foreground">
                 {suggestion.title}
               </span>
-              <span className="aui-thread-welcome-suggestion-text-2 text-muted-foreground">
+              <span className="aui-thread-welcome-suggestion-text-2 text-muted-foreground text-xs leading-normal line-clamp-1">
                 {suggestion.label}
               </span>
             </Button>
@@ -211,15 +226,9 @@ const AssistantMessage: FC = () => {
       data-role="assistant"
     >
       <div className="aui-assistant-message-content wrap-break-word px-2 text-foreground leading-relaxed">
-        {/* Show a typing indicator if the AI is running but hasn't output anything yet */}
         <AssistantIf condition={({ message }) => message.status?.type === "running" && message.content.length === 0}>
-          <div className="flex items-center gap-2 text-muted-foreground text-sm py-1">
-            <span className="flex gap-1">
-              <span className="w-2 h-2 rounded-full bg-current animate-bounce [animation-delay:-0.3s]"></span>
-              <span className="w-2 h-2 rounded-full bg-current animate-bounce [animation-delay:-0.15s]"></span>
-              <span className="w-2 h-2 rounded-full bg-current animate-bounce"></span>
-            </span>
-            Thinking...
+          <div className="flex items-center py-2 px-1">
+            <span className="w-2.5 h-2.5 rounded-full bg-primary animate-pulse shadow-lg shadow-primary/50" />
           </div>
         </AssistantIf>
 
@@ -229,6 +238,14 @@ const AssistantMessage: FC = () => {
             tools: { Fallback: ToolFallback },
           }}
         />
+
+        <AssistantIf condition={({ message }) => message.status?.type === "running" && message.content.length > 0}>
+          <div className="inline-flex items-center gap-1.5 text-muted-foreground text-xs mt-2 py-0.5 px-2 bg-muted/40 rounded-full border border-border/50">
+            <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+            <span>Generating...</span>
+          </div>
+        </AssistantIf>
+
         <MessageError />
       </div>
 

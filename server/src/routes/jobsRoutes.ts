@@ -1,5 +1,6 @@
 import express from "express";
 import { createJob, getJobStatus, getStatusByName } from "../controllers/jobsController.js";
+import { handleChat } from "../controllers/chatController.js";
 import { executeNextStep } from "../pipeline.js";
 import { Receiver } from "@upstash/qstash";
 
@@ -38,6 +39,7 @@ const verifyQstashSignature = async (req: any, res: any, next: any) => {
 router.post("/index", createJob);
 router.get("/status/:jobId", getJobStatus);
 router.get("/status", getStatusByName);
+router.post("/chat", handleChat);
 
 router.post(
   "/pipeline/step",
