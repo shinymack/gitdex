@@ -11,9 +11,41 @@ const qstash = new Client({ token: process.env.QSTASH_TOKEN! });
 
 interface PipelineData {
     files: { path: string; content: string }[];
+    readme: string;
     toc: any[];
     generatedFiles: { filename: string; content: string }[];
     sectionsWritten: number;
+}
+
+function scoreFile(path: string): number {
+    let score = 0;
+    const name = path.split('/').pop()?.toLowerCase() || '';
+    const lower = path.toLowerCase();
+
+    if (/^readme/i.test(name) || /^(package\.json|cargo\.toml|go\.mod|pyproject\.toml)$/.test(name)) score += 10;
+    if (/^(index|main|app|server|cli)\.(ts|js|tsx|jsx|py|go|rs|java)$/.test(name)) score += 8;
+    if (/^src\/|^lib\//.test(lower)) score += 5;
+    if (/config|\.config\./i.test(name)) score += 3;
+    if (path.split('/').length <= 2) score += 2;
+    if (/test|spec|__test__|__tests__/i.test(lower)) score -= 3;
+    if (/example|demo|sample|fixture/i.test(lower)) score -= 5;
+
+    return score;
+}
+
+function detectFramework(files: { path: string }[]): string {
+    const paths = files.map(f => f.path.toLowerCase());
+    const has = (p: string) => paths.some(f => f.includes(p));
+    const parts: string[] = [];
+    if (has('next.config')) parts.push('Next.js');
+    else if (has('vite.config')) parts.push('Vite');
+    else if (has('angular.json')) parts.push('Angular');
+    if (has('package.json')) parts.push('Node.js');
+    if (has('cargo.toml')) parts.push('Rust');
+    if (has('go.mod')) parts.push('Go');
+    if (has('pyproject.toml') || has('setup.py')) parts.push('Python');
+    if (has('pom.xml') || has('build.gradle')) parts.push('Java');
+    return parts.length > 0 ? parts.join('/') : 'Unknown';
 }
 
 async function triggerNextStep(jobId: string, delay?: any) {
@@ -49,13 +81,13 @@ export async function executeNextStep(jobId: string) {
             try {
                 data = JSON.parse(job.data);
             } catch (e) {
-                data = { files: [], toc: [], generatedFiles: [], sectionsWritten: 0 };
+                data = { files: [], readme: '', toc: [], generatedFiles: [], sectionsWritten: 0 };
             }
         } else {
             data = job.data as PipelineData;
         }
     } else {
-        data = { files: [], toc: [], generatedFiles: [], sectionsWritten: 0 };
+        data = { files: [], readme: '', toc: [], generatedFiles: [], sectionsWritten: 0 };
     }
 
     let nextJobId: string | null = null;
@@ -74,7 +106,7 @@ export async function executeNextStep(jobId: string) {
             case 2:
                 await writeSections(job, data);
                 const isFinished = data.sectionsWritten >= data.toc.length;
-                await triggerNextStep(job.id, isFinished ? undefined : "5s");
+                await triggerNextStep(job.id, isFinished ? undefined : "1s");
                 break;
             case 3:
                 await commitToGithub(job, data);
@@ -119,7 +151,10 @@ async function scanRepository(job: any, data: PipelineData) {
         !item.path.match(/\b(node_modules|dist|build|\.git|__pycache__|\.lock|\.min\.js|\.bundle\.js)\b/i)
     );
 
-    const topFiles = relevantFiles.slice(0, 50);
+    const topFiles = relevantFiles
+        .map((f: any) => ({ ...f, score: scoreFile(f.path!) }))
+        .sort((a: any, b: any) => b.score - a.score)
+        .slice(0, 100);
     const files = [];
     for (const file of topFiles) {
         try {
@@ -137,6 +172,8 @@ async function scanRepository(job: any, data: PipelineData) {
     }
 
     data.files = files;
+    const readmeFile = files.find(f => /^readme/i.test(f.path.split('/').pop() || ''));
+    data.readme = readmeFile?.content?.slice(0, 3000) || '';
     await queue.updateJob(job.id, { currentStep: 1, data: JSON.stringify(data) });
 }
 
@@ -144,7 +181,12 @@ async function planStructure(job: any, data: PipelineData) {
     console.log(`[Pipeline] Step 1: Planning TOC for ${job.owner}/${job.repo}`);
     const filePaths = data.files.map((f: any) => f.path).join('\n');
 
-    const prompt = `You are GitDex, an expert in repo analysis. From these file paths in ${job.owner}/${job.repo}:\n${filePaths}\n\nGenerate a hierarchical table of contents for documentation with 4-8 top-level sections. Use numeric prefixes (e.g., 1., 2.1.). For each section, provide prefix, title, filename (prefix_title.mdx), description, and relevant_files (2-4 paths). Output as a valid JSON array ONLY.`;
+    const framework = detectFramework(data.files);
+    const readmeContext = data.readme
+        ? `\n\nProject README (first 3000 chars):\n${data.readme}\n`
+        : '';
+
+    const prompt = `You are GitDex, an expert in repo analysis. This is a ${framework} project: ${job.owner}/${job.repo}.${readmeContext}\nFile paths in the repository:\n${filePaths}\n\nGenerate a hierarchical table of contents for documentation with 4-8 top-level sections. Use numeric prefixes (e.g., 1., 2.1.). For each section, provide prefix, title, filename (prefix_title.mdx), description, and relevant_files (2-4 paths). Output as a valid JSON array ONLY.`;
 
     const tocText = await generateWithRetry({ prompt });
     const cleanedToc = tocText.replace(/```json\n?|\n?```/g, '').trim();
@@ -181,12 +223,16 @@ async function writeSections(job: any, data: PipelineData) {
     const relevantContents = data.files.filter((f: any) => entry.relevant_files.includes(f.path));
 
     const maxTokens = 100000;
+    const MIN_TOKENS_PER_FILE = 5000;
+    const totalSize = relevantContents.reduce((sum, f) => sum + f.content.length, 0);
     let truncatedContents = [];
     for (const f of relevantContents) {
+        const proportion = totalSize > 0 ? f.content.length / totalSize : 1 / relevantContents.length;
+        const allocated = Math.max(MIN_TOKENS_PER_FILE, Math.floor(maxTokens * proportion));
         const tokens = tiktoken.encode(f.content);
-        if (tokens.length > maxTokens / Math.max(relevantContents.length, 1)) {
-            const truncated = tiktoken.decode(tokens.slice(0, Math.floor(maxTokens / Math.max(relevantContents.length, 1))));
-            truncatedContents.push(`File: ${f.path}\n${truncated}... (truncated)\n---\n`);
+        if (tokens.length > allocated) {
+            const truncated = tiktoken.decode(tokens.slice(0, allocated));
+            truncatedContents.push(`File: ${f.path}\n${truncated}... (truncated from ${tokens.length} to ${allocated} tokens)\n---\n`);
         } else {
             truncatedContents.push(`File: ${f.path}\n${f.content}\n---\n`);
         }
