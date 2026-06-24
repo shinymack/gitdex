@@ -1,7 +1,7 @@
 import { DocsPage, DocsBody } from 'fumadocs-ui/page';
 import { redirect } from 'next/navigation';
 import { compiler } from '@/lib/mdx-compiler';
-import { getMDXComponents } from '../../../../../mdx-components';
+import { getMDXComponents } from '@/mdx-components';
 import { DynamicDocsSource } from '@/lib/dynamic-source';
 import { getTableOfContents } from 'fumadocs-core/content/toc';
 import { SyncingGuard } from '@/components/syncing-guard';

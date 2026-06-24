@@ -4,13 +4,13 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import ModernNav from '../components/ModernNav';
+import ModernNav from '@/components/ModernNav';
 import { ClientOnly } from '@/components/ClientOnly';
 import { ArrowRight, Zap, Search, Sparkles } from 'lucide-react';
-import { validateGitHubUrl } from '../lib/validation';
-import InteractiveConstellation from '../components/InteractiveConstellation';
-import { FlickeringGrid } from '../components/FlickeringGrid';
-import FeatureGrid from '../components/FeatureGrid';
+import { validateGitHubUrl } from '@/lib/validation';
+import InteractiveConstellation from '@/components/InteractiveConstellation';
+import { FlickeringGrid } from '@/components/FlickeringGrid';
+import FeatureGrid from '@/components/FeatureGrid';
 
 function WordRotate() {
   const words = ['documentation.', 'diagrams.', 'AI chat.'];
