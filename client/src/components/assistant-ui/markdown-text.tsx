@@ -8,16 +8,21 @@ import {
   useIsMarkdownCodeBlock,
 } from "@assistant-ui/react-markdown";
 import remarkGfm from "remark-gfm";
-import { type FC, memo, useState } from "react";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
+import React, { type FC, memo, useState } from "react";
 import { CheckIcon, CopyIcon } from "lucide-react";
 
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
 import { cn } from "@/lib/utils";
+import { Mermaid } from "@/components/mermaid";
 
 const MarkdownTextImpl = () => {
   return (
     <MarkdownTextPrimitive
-      remarkPlugins={[remarkGfm]}
+      remarkPlugins={[remarkGfm, remarkMath]}
+      rehypePlugins={[rehypeKatex]}
       className="aui-md"
       components={defaultComponents}
     />
@@ -27,6 +32,7 @@ const MarkdownTextImpl = () => {
 export const MarkdownText = memo(MarkdownTextImpl);
 
 const CodeHeader: FC<CodeHeaderProps> = ({ language, code }) => {
+  if (language === 'mermaid') return null;
   const { isCopied, copyToClipboard } = useCopyToClipboard();
   const onCopy = () => {
     if (!code || isCopied) return;
@@ -63,6 +69,27 @@ const useCopyToClipboard = ({
   };
 
   return { isCopied, copyToClipboard };
+};
+
+const MermaidCodeBlock: FC<{ chart: string }> = ({ chart }) => {
+  const { isCopied, copyToClipboard } = useCopyToClipboard();
+  const onCopy = () => {
+    copyToClipboard(chart);
+  };
+
+  return (
+    <div className="my-5 w-full border border-border rounded-lg overflow-hidden bg-background">
+      <div className="flex items-center justify-between gap-4 bg-muted/50 px-4 py-2 font-semibold text-foreground text-sm border-b border-border">
+        <span className="font-mono text-xs text-muted-foreground">mermaid diagram</span>
+        <TooltipIconButton tooltip="Copy code" onClick={onCopy}>
+          {!isCopied ? <CopyIcon className="h-4 w-4" /> : <CheckIcon className="h-4 w-4" />}
+        </TooltipIconButton>
+      </div>
+      <div className="p-1 bg-background">
+        <Mermaid chart={chart} border={false} margin={false} />
+      </div>
+    </div>
+  );
 };
 
 const defaultComponents = memoizeMarkdownComponents({
@@ -160,13 +187,15 @@ const defaultComponents = memoizeMarkdownComponents({
     <hr className={cn("aui-md-hr my-5 border-b", className)} {...props} />
   ),
   table: ({ className, ...props }) => (
-    <table
-      className={cn(
-        "aui-md-table my-5 w-full border-separate border-spacing-0 overflow-y-auto",
-        className,
-      )}
-      {...props}
-    />
+    <div className="w-full overflow-x-auto border border-border rounded-lg my-5 bg-background">
+      <table
+        className={cn(
+          "aui-md-table min-w-full border-separate border-spacing-0",
+          className,
+        )}
+        {...props}
+      />
+    </div>
   ),
   th: ({ className, ...props }) => (
     <th
@@ -201,16 +230,18 @@ const defaultComponents = memoizeMarkdownComponents({
       {...props}
     />
   ),
-  pre: ({ className, ...props }) => (
+  pre: ({ className, children, ...props }) => (
     <pre
       className={cn(
         "aui-md-pre overflow-x-auto rounded-t-none! rounded-b-lg bg-black p-4 text-white",
         className,
       )}
       {...props}
-    />
+    >
+      {children}
+    </pre>
   ),
-  code: function Code({ className, ...props }) {
+  code: function Code({ className, children, ...props }) {
     const isCodeBlock = useIsMarkdownCodeBlock();
     return (
       <code
@@ -220,7 +251,19 @@ const defaultComponents = memoizeMarkdownComponents({
           className,
         )}
         {...props}
-      />
+      >
+        {children}
+      </code>
+    );
+  },
+  SyntaxHighlighter: ({ language, code, components: { Pre, Code } }) => {
+    if (language === 'mermaid') {
+      return <MermaidCodeBlock chart={code} />;
+    }
+    return (
+      <Pre>
+        <Code>{code}</Code>
+      </Pre>
     );
   },
   CodeHeader,

@@ -11,6 +11,8 @@ export const AssistantModal = ({ owner, repo }: { owner: string; repo: string })
   const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
   const [open, setOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [width, setWidth] = useState(480);
+  const [isDragging, setIsDragging] = useState(false);
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768);
@@ -27,6 +29,36 @@ export const AssistantModal = ({ owner, repo }: { owner: string; repo: string })
     }
     return () => { document.body.style.overflow = ""; };
   }, [open, isMobile]);
+
+  const startResizing = (mouseDownEvent: React.MouseEvent) => {
+    mouseDownEvent.preventDefault();
+    setIsDragging(true);
+  };
+
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const handleMouseMove = (mouseMoveEvent: MouseEvent) => {
+      const newWidth = window.innerWidth - mouseMoveEvent.clientX;
+      const minW = 360;
+      const maxW = window.innerWidth / 2;
+      if (newWidth >= minW && newWidth <= maxW) {
+        setWidth(newWidth);
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+    };
+
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+
+    return () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isDragging]);
 
   const runtime = useChatRuntime({
     transport: new AssistantChatTransport({
@@ -51,14 +83,32 @@ export const AssistantModal = ({ owner, repo }: { owner: string; repo: string })
       {/* Sidebar panel */}
       <div
         className={cn(
-          "fixed top-0 right-0 z-50 flex flex-col bg-popover border-l border-border shadow-2xl transition-transform duration-300 ease-in-out",
-          // Desktop: full height sidebar, 480px wide
-          "md:h-screen md:w-[480px]",
+          "fixed top-0 right-0 z-50 flex flex-col bg-popover border-l border-border shadow-2xl",
           // Mobile: full screen
-          "h-screen w-full",
-          open ? "translate-x-0" : "translate-x-full"
+          "h-screen w-full md:w-auto",
+          open ? "translate-x-0" : "translate-x-full",
+          !isDragging ? "transition-transform duration-300 ease-in-out" : ""
         )}
+        style={{
+          width: isMobile ? '100vw' : `${width}px`
+        }}
       >
+        {/* Resizer Handle */}
+        {!isMobile && (
+          <div
+            onMouseDown={startResizing}
+            className={cn(
+              "absolute left-0 top-0 bottom-0 w-1.5 cursor-ew-resize hover:bg-primary/50 transition-colors group/resizer z-50 flex items-center justify-center",
+              isDragging && "bg-primary/50"
+            )}
+          >
+            {/* Parallel lines badge hint */}
+            <div className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2 w-3.5 h-8 rounded-md border border-border bg-popover hover:bg-muted flex gap-[2px] items-center justify-center cursor-ew-resize shadow-md select-none group-hover/resizer:scale-105 transition-all">
+              <div className="w-[1px] h-3.5 bg-muted-foreground/60 rounded-full" />
+              <div className="w-[1px] h-3.5 bg-muted-foreground/60 rounded-full" />
+            </div>
+          </div>
+        )}
         {/* Header */}
         <div className="flex items-center justify-between border-b px-4 py-3 bg-muted/30 shrink-0">
           <span className="font-medium text-foreground flex items-center gap-2 text-sm">
@@ -92,17 +142,21 @@ export const AssistantModal = ({ owner, repo }: { owner: string; repo: string })
         </div>
       </div>
 
-      {/* Trigger button - fixed bottom right, hidden when open on desktop */}
-      <button
-        onClick={() => setOpen(!open)}
-        className={cn(
-          "fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-2.5 rounded-full bg-background border border-border shadow-lg text-sm font-medium text-foreground transition-all duration-200 hover:bg-muted hover:shadow-xl active:scale-95 group",
-          open && "md:right-[496px]"
-        )}
-      >
-        <MessageCircle className="h-4 w-4 text-primary group-hover:scale-110 transition-transform duration-200" />
-        <span>{open ? "Close" : "Ask AI"}</span>
-      </button>
+      {/* Trigger button - fixed bottom right, hidden when open on mobile */}
+      {!(open && isMobile) && (
+        <button
+          onClick={() => setOpen(!open)}
+          className={cn(
+            "fixed bottom-6 z-50 flex items-center gap-2 px-4 py-2.5 rounded-full bg-background border border-border shadow-lg text-sm font-medium text-foreground transition-all duration-200 hover:bg-muted hover:shadow-xl active:scale-95 group"
+          )}
+          style={{
+            right: isMobile ? '24px' : (open ? `${width + 16}px` : '24px')
+          }}
+        >
+          <MessageCircle className="h-4 w-4 text-primary group-hover:scale-110 transition-transform duration-200" />
+          <span>{open ? "Close" : "Ask AI"}</span>
+        </button>
+      )}
     </AssistantRuntimeProvider>
   );
 };

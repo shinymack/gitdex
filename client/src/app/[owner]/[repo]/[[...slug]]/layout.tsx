@@ -28,7 +28,15 @@ export default async function Layout({ children, params }: LayoutProps) {
         banner: (
           <div className="flex flex-col gap-2 p-4 border-b border-border">
             <div className="text-sm text-muted-foreground">
-              Documentation for <strong className="text-foreground">{owner}/{repo}</strong>
+              Documentation for{" "}
+              <a
+                href={`https://github.com/${owner}/${repo}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-foreground font-semibold hover:underline"
+              >
+                {owner}/{repo}
+              </a>
             </div>
             <ReindexButton owner={owner} repo={repo} />
           </div>

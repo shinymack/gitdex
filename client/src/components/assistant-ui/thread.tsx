@@ -16,6 +16,7 @@ import {
   ErrorPrimitive,
   MessagePrimitive,
   ThreadPrimitive,
+  useThread,
 } from "@assistant-ui/react";
 import {
   ArrowDownIcon,
@@ -40,8 +41,9 @@ export const Thread: FC<{ owner?: string; repo?: string }> = ({ owner, repo }) =
       }}
     >
       <ThreadPrimitive.Viewport
-        turnAnchor="top"
-        className="aui-thread-viewport relative flex-1 overflow-y-auto scroll-smooth px-4 pt-4"
+        turnAnchor="bottom"
+        autoScroll={true}
+        className="aui-thread-viewport relative flex-1 overflow-y-auto scroll-smooth px-4 pt-4 overscroll-contain"
       >
         <AssistantIf condition={({ thread }) => thread.isEmpty}>
           <ThreadWelcome owner={owner} repo={repo} />
@@ -154,6 +156,23 @@ const ThreadSuggestions: FC = () => {
 };
 
 const Composer: FC = () => {
+  const messages = useThread((t: any) => t.messages);
+  const userMessagesCount = messages.filter((m: any) => m.role === "user").length;
+  const isLimitReached = userMessagesCount >= 10;
+
+  if (isLimitReached) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-1.5 p-4 rounded-xl border border-amber-500/20 bg-amber-500/5 text-center">
+        <span className="text-xs font-semibold text-amber-500/90">
+          Message Limit Reached
+        </span>
+        <p className="text-xs text-muted-foreground">
+          This thread has reached the 10-message limit. Use the reset icon at the top right to start a new chat.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <ComposerPrimitive.Root className="aui-composer-root relative flex w-full flex-col">
       <ComposerPrimitive.AttachmentDropzone className="aui-composer-attachment-dropzone flex w-full flex-col rounded-2xl border border-input bg-background px-1 pt-2 outline-none transition-shadow has-[textarea:focus-visible]:border-ring has-[textarea:focus-visible]:ring-2 has-[textarea:focus-visible]:ring-ring/20 data-[dragging=true]:border-ring data-[dragging=true]:border-dashed data-[dragging=true]:bg-accent/50">
@@ -172,9 +191,19 @@ const Composer: FC = () => {
 };
 
 const ComposerAction: FC = () => {
+  const messages = useThread((t: any) => t.messages);
+  const totalAttachments = messages.reduce((acc: number, m: any) => acc + (m.attachments?.length || 0), 0);
+  const isAttachmentLimitReached = totalAttachments >= 5;
+
   return (
     <div className="aui-composer-action-wrapper relative mx-2 mb-2 flex items-center justify-between">
-      <ComposerAddAttachment />
+      {isAttachmentLimitReached ? (
+        <span className="text-[10px] text-amber-500/80 font-medium px-2 py-1 rounded bg-amber-500/5 border border-amber-500/10 select-none">
+          Attachment limit reached (max 5)
+        </span>
+      ) : (
+        <ComposerAddAttachment />
+      )}
 
       <AssistantIf condition={({ thread }) => !thread.isRunning}>
         <ComposerPrimitive.Send asChild>

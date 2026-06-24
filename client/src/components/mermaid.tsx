@@ -3,7 +3,15 @@
 import { use, useEffect, useId, useState, useRef } from 'react';
 import { useTheme } from 'next-themes';
 
-export function Mermaid({ chart }: { chart: string }) {
+export function Mermaid({ 
+  chart, 
+  border = true, 
+  margin = true 
+}: { 
+  chart: string; 
+  border?: boolean; 
+  margin?: boolean; 
+}) {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -11,7 +19,7 @@ export function Mermaid({ chart }: { chart: string }) {
   }, []);
 
   if (!mounted) return null;
-  return <MermaidContent chart={chart} />;
+  return <MermaidContent chart={chart} border={border} margin={margin} />;
 }
 
 const cache = new Map<string, Promise<unknown>>();
@@ -117,7 +125,15 @@ function fixMermaidSyntax(chart: string): string {
   return fixedChart;
 }
 
-function MermaidContent({ chart }: { chart: string }) {
+function MermaidContent({ 
+  chart, 
+  border = true, 
+  margin = true 
+}: { 
+  chart: string; 
+  border?: boolean; 
+  margin?: boolean; 
+}) {
   const id = useId();
   const { resolvedTheme } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -325,13 +341,13 @@ function MermaidContent({ chart }: { chart: string }) {
   }
 
   return (
-    <div className="mermaid-pan-zoom-container">
+    <div className={margin ? "mermaid-pan-zoom-container" : ""}>
       <div
         ref={containerRef}
         className="mermaid-svg-wrapper"
         style={{
-          border: `1px solid ${resolvedTheme === 'dark' ? '#1a1a1a' : '#e5e7eb'}`,
-          borderRadius: '0.5rem',
+          border: border ? `1px solid ${resolvedTheme === 'dark' ? '#1a1a1a' : '#e5e7eb'}` : 'none',
+          borderRadius: border ? '0.5rem' : '0',
           overflow: 'hidden',
           background: resolvedTheme === 'dark' ? '#0a0a0a' : '#ffffff',
           minHeight: '400px',
