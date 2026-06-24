@@ -15,7 +15,7 @@ export default async function Layout(props: LayoutProps) {
   const params = await props.params;
 
   return (
-    <div className="font-serif">
+    <div className="font-sans">
       {props.children ? (
         props.children
       ) : (

@@ -28,70 +28,90 @@ function cachePromise<T>(
   return promise;
 }
 
-// Enhanced function to fix common Mermaid syntax issues
+function wrapLabelText(text: string, maxLen: number = 20): string {
+  if (text.includes('<br') || text.includes('\n')) return text;
+  if (text.length <= maxLen) return text;
+
+  const words = text.split(' ');
+  const lines: string[] = [];
+  let currentLine = '';
+
+  for (const word of words) {
+    if ((currentLine + (currentLine ? ' ' : '') + word).length > maxLen) {
+      if (currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        lines.push(word);
+      }
+    } else {
+      currentLine += (currentLine ? ' ' : '') + word;
+    }
+  }
+  if (currentLine) {
+    lines.push(currentLine);
+  }
+  return lines.join('<br/>');
+}
+
 function fixMermaidSyntax(chart: string): string {
   let fixedChart = chart.trim();
 
-  // Helper function to clean content by removing all quotes (single, double, backticks)
   const cleanContent = (content: string) => content.replace(/['"`]/g, '');
 
-  // Fix node content for square brackets: A[...]
-  fixedChart = fixedChart.replace(/(\w+)\[([^\]]+)\]/g, (match, id, content) => {
+  fixedChart = fixedChart.replace(/(\w+)(\[\[?|\(\(?|\{\{?|\[\()\s*"([^"\n]+)"\s*(\]\]?|\)\)?|\}\}?|\)\])/g, (match, id, open, content, close) => {
     const cleaned = cleanContent(content);
-    return `${id}["${cleaned}"]`;
+    const wrapped = wrapLabelText(cleaned);
+    return `${id}${open}"${wrapped}"${close}`;
   });
 
-  // Fix node content for parentheses: A(...)
-  fixedChart = fixedChart.replace(/(\w+)\(([^)]+)\)/g, (match, id, content) => {
+  fixedChart = fixedChart.replace(/(\w+)(\[\[?|\(\(?|\{\{?|\[\()([^"\]\)\}\n]+)(\]\]?|\)\)?|\}\}?|\)\])/g, (match, id, open, content, close) => {
     const cleaned = cleanContent(content);
-    return `${id}("${cleaned}")`;
+    const wrapped = wrapLabelText(cleaned);
+    return `${id}${open}"${wrapped}"${close}`;
   });
 
-  // Fix node content for curly braces: A{...}
-  fixedChart = fixedChart.replace(/(\w+)\{([^}]+)\}/g, (match, id, content) => {
+  fixedChart = fixedChart.replace(/(==>|-->|-\.->)\s*\|"?([^"|\n]+)"?\|/g, (match, arrow, content) => {
     const cleaned = cleanContent(content);
-    return `${id}{"${cleaned}"}`;
+    const wrapped = wrapLabelText(cleaned, 25);
+    return `${arrow}|"${wrapped}"|`;
   });
 
-  fixedChart = fixedChart.replace(/([\w\s]*)([\[\(\{\|])([^\]\)\}\|"'`]+)([\]\)\}\|])/g, (match, prefix, open, content, close) => {
+  fixedChart = fixedChart.replace(/(\w+)\s*--\s*"([^"\n]+)"\s*-->\s*(\w+)/g, (match, from, content, to) => {
     const cleaned = cleanContent(content);
-    return `${prefix}${open}"${cleaned}"${close}`;
+    const wrapped = wrapLabelText(cleaned, 25);
+    return `${from} -->|"${wrapped}"| ${to}`;
   });
 
-  // Fix the main issue: arrows with both labels and text after the arrow
-  // Pattern for: A -- "Label" --> B: "Additional text"
   fixedChart = fixedChart.replace(/(\w+)\s*--\s*"([^"]*)"\s*-->\s*(\w+)\s*:\s*"([^"]*)"/g, (match, from, label1, to, label2) => {
-    return `${from} -->|"${label1}: ${label2}"| ${to}`;
+    const wrapped = wrapLabelText(`${label1}: ${label2}`);
+    return `${from} -->|"${wrapped}"| ${to}`;
   });
 
-  // Pattern for: A --> B: "Label"
   fixedChart = fixedChart.replace(/(\w+)\s*-->\s*(\w+)\s*:\s*"([^"]*)"/g, (match, from, to, label) => {
     const cleanedLabel = cleanContent(label);
-    return `${from} -->|"${cleanedLabel}"| ${to}`;
+    const wrapped = wrapLabelText(cleanedLabel);
+    return `${from} -->|"${wrapped}"| ${to}`;
   });
 
-  // Pattern for: A -.-> B: "Label"
   fixedChart = fixedChart.replace(/(\w+)\s*-\.\->\s*(\w+)\s*:\s*"([^"]*)"/g, (match, from, to, label) => {
     const cleanedLabel = cleanContent(label);
-    return `${from} -.->|"${cleanedLabel}"| ${to}`;
+    const wrapped = wrapLabelText(cleanedLabel);
+    return `${from} -.->|"${wrapped}"| ${to}`;
   });
-  // Add this to your fixMermaidSyntax function
+
   fixedChart = fixedChart.replace(/SubGraph\s+([^\n]+)\n([\s\S]*?)End/g, (match, name, content) => {
     return `subgraph "${name.trim()}"\n${content}end`;
   });
-  // Pattern for: A ==> B: "Label"
+
   fixedChart = fixedChart.replace(/(\w+)\s*==>\s*(\w+)\s*:\s*"([^"]*)"/g, (match, from, to, label) => {
     const cleanedLabel = cleanContent(label);
-    return `${from} ==>|"${cleanedLabel}"| ${to}`;
+    const wrapped = wrapLabelText(cleanedLabel);
+    return `${from} ==>|"${wrapped}"| ${to}`;
   });
 
-  // Fix arrow syntax without labels - first handle dotted arrows to avoid conflicts
   fixedChart = fixedChart.replace(/(\w+)\s*-\.\s*>\s*(\w+)/g, '$1 -.-> $2');
-
-  // Fix solid arrows: any sequence of dashes followed by >
   fixedChart = fixedChart.replace(/(\w+)\s*-+\s*>\s*(\w+)/g, '$1 --> $2');
-
-  // Fix thick arrows
   fixedChart = fixedChart.replace(/(\w+)\s*=\s*>\s*(\w+)/g, '$1 ==> $2');
 
   return fixedChart;
@@ -113,33 +133,62 @@ function MermaidContent({ chart }: { chart: string }) {
   mermaid.initialize({
     startOnLoad: false,
     securityLevel: 'loose',
-    fontFamily: 'inherit',
-    themeCSS: 'margin: 1.5rem auto 0;',
+    htmlLabels: true,
+    fontFamily: '"Plus Jakarta Sans", var(--font-mzh), sans-serif',
+    flowchart: {
+      padding: 24,
+    },
+    themeCSS: `
+      @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+      margin: 1.5rem auto 0;
+      .node rect, .node circle, .node ellipse, .node polygon, .node path {
+        stroke-width: 2.5px !important;
+      }
+      .label {
+        font-family: "Plus Jakarta Sans", sans-serif !important;
+        font-size: 14px !important;
+        font-weight: 600 !important;
+        text-align: center;
+      }
+      text.nodeLabel, text.labelText, .label, .edgeLabel span {
+        font-family: "Plus Jakarta Sans", sans-serif !important;
+        font-size: 14px !important;
+        font-weight: 600 !important;
+      }
+    `,
     theme: resolvedTheme === 'dark' ? 'dark' : 'default',
-    // Suppress default error rendering
+    look: 'handDrawn',
     suppressErrorRendering: true,
   });
 
   const renderResult = use(
     cachePromise(`${chart}-${resolvedTheme}`, async () => {
       try {
-        // First try to render the original chart without fixing
-        try {
-          const result = await mermaid.render(id + '-original', chart.replaceAll('\\n', '\n'));
-          return { success: true, ...result };
-        } catch (originalError) {
-          // If original fails, try with fixed syntax
-          console.log(originalError)
+        if (typeof window !== 'undefined' && document.fonts) {
           try {
-            const fixedChart = fixMermaidSyntax(chart);
-            const result = await mermaid.render(id, fixedChart.replaceAll('\\n', '\n'));
+            await Promise.race([
+              document.fonts.ready,
+              new Promise((resolve) => setTimeout(resolve, 1500)),
+            ]);
+          } catch (e) {
+            console.warn('Font loading check failed:', e);
+          }
+        }
+
+        const fixedChart = fixMermaidSyntax(chart);
+        try {
+          const result = await mermaid.render(id, fixedChart.replaceAll('\\n', '\n'));
+          return { success: true, ...result };
+        } catch (fixedError) {
+          console.log('Fixed rendering failed, trying original:', fixedError);
+          try {
+            const result = await mermaid.render(id + '-original', chart.replaceAll('\\n', '\n'));
             return { success: true, ...result };
-          } catch (error) {
-            // If both fail, show the raw diagram code in a neutral box
-            const fixedError = error as Error;
+          } catch (originalError) {
+            const error = originalError as Error;
             return {
               success: false,
-              error: fixedError.message || 'Unknown Mermaid error',
+              error: error.message || 'Unknown Mermaid error',
               svg: `
                 <div class="border border-red-200 bg-red-50 dark:bg-red-950/20 dark:border-red-800 rounded-md p-4">
                   <div class="flex items-start space-x-2">
@@ -309,6 +358,8 @@ function MermaidContent({ chart }: { chart: string }) {
 
       {/* Add custom styles */}
       <style jsx>{`
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+        
         .mermaid-pan-zoom-container {
           margin: 1.5rem auto;
         }
@@ -330,6 +381,15 @@ function MermaidContent({ chart }: { chart: string }) {
           max-width: 100%;
           height: auto;
           display: block;
+        }
+
+        .mermaid-svg-wrapper svg text,
+        .mermaid-svg-wrapper svg .label,
+        .mermaid-svg-wrapper svg .edgeLabel span {
+          font-family: "Plus Jakarta Sans", sans-serif !important;
+          font-size: 14px !important;
+          font-weight: 600 !important;
+          text-anchor: middle !important;
         }
       `}</style>
     </div>
