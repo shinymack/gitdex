@@ -19,31 +19,30 @@ GitDex analyzes your codebase structure, plans a table of contents, writes compr
 
 To support serverless timeout limits, the indexing workflow is decoupled into step-by-step executions orchestrated by QStash:
 
-```mermaid
-graph TD
-    A[User clicks Reindex] --> B[Create job in Redis]
-    B --> C[Step 0: Scan repository files]
-    C --> D[Step 1: Plan Table of Contents]
-    D --> E[Step 2: Generate MDX sections with delay]
-    E -- Loop sections --> E
-    E --> F[Step 3: Commit docs to GitHub and release locks]
-```
+<div align="center" style="margin: 24px 0;">
+  <a href="https://gitdex-alpha.vercel.app/shinymack/gitdex" target="_blank" style="text-decoration: none;">
+    <span style="display: inline-block; padding: 10px 24px; font-size: 14px; font-weight: 600; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; color: #ffffff; background-color: #10b981; border-radius: 6px; border: 1px solid #059669; text-decoration: none;">
+      Explore Deployed Docs &rarr;
+    </span>
+  </a>
+</div>
 
 ---
 
-## Project Structure
+## Repository Architecture
 
-This repository is split into two packages:
-* **[Client](./client/README.md)**: Next.js frontend, Fumadocs reader, and assistant chat UI.
-* **[Server](./server/README.md)**: Express API backend, Redis queue, and Gemini pipeline handler.
+This repository is split into two main packages:
 
-Refer to the links above for environment configuration and run instructions for each package.
+* **[Client](./client/README.md)**: A Next.js application that renders documentation via Fumadocs and provides the AI assistant interface.
+* **[Server](./server/README.md)**: An Express API that manages the Upstash Redis queue and handles the Gemini indexing pipeline.
+
+For setup instructions and configuration steps, see the links above.
 
 ---
 
-## Technology Stack
+## Technical Stack
 
 * **Frontend**: Next.js, Tailwind CSS, Fumadocs, assistant-ui
 * **Backend**: Node.js, Express, Upstash Redis, Upstash QStash
-* **AI**: Google Gemini (via Google AI SDK)
-* **Integration**: Octokit (GitHub REST API)
+* **AI Model**: Google Gemini (via Google AI SDK)
+* **GitHub Integration**: Octokit (GitHub REST API)
