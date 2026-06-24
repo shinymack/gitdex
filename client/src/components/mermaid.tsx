@@ -148,8 +148,7 @@ function MermaidContent({
 
   mermaid.initialize({
     startOnLoad: false,
-    securityLevel: 'loose',
-    htmlLabels: true,
+    securityLevel: 'strict',
     fontFamily: '"Plus Jakarta Sans", var(--font-mzh), sans-serif',
     flowchart: {
       padding: 24,

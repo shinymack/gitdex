@@ -12,7 +12,14 @@ export const handleChat = async (req: Request, res: Response) => {
         const repo = req.headers['x-github-repo'] as string || parseReferer(req.headers['referer'] || null)?.repo;
 
         if (!owner || !repo) {
-            res.status(400).send('Missing owner or repo');
+            res.status(400).json({ error: 'Missing owner or repo' });
+            return;
+        }
+
+        const OWNER_RE = /^[a-zA-Z0-9][a-zA-Z0-9-]{0,38}$/;
+        const REPO_RE = /^[a-zA-Z0-9._-]{1,100}$/;
+        if (!OWNER_RE.test(owner) || !REPO_RE.test(repo)) {
+            res.status(400).json({ error: 'Invalid owner or repo' });
             return;
         }
 
