@@ -99,16 +99,15 @@ class SimpleQueue {
         await redis.hset(jobId, jobData as any);
         await redis.set(lockKey, now.toString(), { ex: 3600 });
 
-        // STRICT SERIALIZATION: Check if any job is currently processing
-        const activeJobId = await redis.get('system:active_job');
+        // STRICT SERIALIZATION: Atomically claim the active slot (SET NX avoids race condition)
+        const claimed = await redis.set('system:active_job', jobId, { nx: true });
 
-        if (!activeJobId) {
-            // No active job! Start immediately.
+        if (claimed === 'OK') {
+            // Won the race — start immediately.
             await this.updateJob(jobId, { state: 'processing' });
-            await redis.set('system:active_job', jobId);
             return { jobId, state: 'processing', newlyStarted: true };
         } else {
-            // A job is already running. Add to queue list and wait.
+            // Another job holds the slot. Add to queue list and wait.
             await redis.rpush('system:queue', jobId);
             return { jobId, state: 'queued', newlyStarted: true };
         }

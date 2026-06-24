@@ -133,7 +133,7 @@ async function scanRepository(job: any, data: PipelineData) {
                 ? fileResponse.data
                 : (fileResponse.data as any).toString();
             files.push({ path: file.path, content: rawContent });
-        } catch (e) { /* skip */ }
+        } catch (e) { console.warn(`[Pipeline] Skipped ${file.path}: ${(e as any).message}`); }
     }
 
     data.files = files;
@@ -149,7 +149,19 @@ async function planStructure(job: any, data: PipelineData) {
     const tocText = await generateWithRetry({ prompt });
     const cleanedToc = tocText.replace(/```json\n?|\n?```/g, '').trim();
 
-    data.toc = JSON.parse(cleanedToc);
+    try {
+        data.toc = JSON.parse(cleanedToc);
+    } catch (e: any) {
+        throw new Error(`Gemini returned invalid JSON for TOC: ${e.message}`);
+    }
+
+    const requiredFields = ['prefix', 'title', 'filename', 'description', 'relevant_files'];
+    for (const entry of data.toc) {
+        for (const field of requiredFields) {
+            if (!entry[field]) throw new Error(`TOC entry missing required field "${field}": ${JSON.stringify(entry)}`);
+        }
+    }
+
     data.toc.sort((a: any, b: any) => {
         const pa = a.prefix.split('.').map(Number);
         const pb = b.prefix.split('.').map(Number);

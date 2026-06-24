@@ -74,6 +74,10 @@ export class DynamicDocsSource {
         return this.pages.length > 0 ? this.pages[0] : null;
     }
 
+    getPages(): DocPage[] {
+        return [...this.pages];
+    }
+
     getPageTree(): PageTree.Root {
         return this.pageTree;
     }
