@@ -1,5 +1,5 @@
 import express from "express";
-import { createJob, getJobStatus, getStatusByName } from "../controllers/jobsController.js";
+import { createJob, getJobStatus, getStatusByName, cronHeal } from "../controllers/jobsController.js";
 import { handleChat } from "../controllers/chatController.js";
 import { executeNextStep } from "../pipeline.js";
 import { Receiver } from "@upstash/qstash";
@@ -40,16 +40,18 @@ router.post("/index", createJob);
 router.get("/status/:jobId", getJobStatus);
 router.get("/status", getStatusByName);
 router.post("/chat", handleChat);
+router.post("/pipeline/cron-heal", verifyQstashSignature, cronHeal);
 
 router.post(
   "/pipeline/step",
   verifyQstashSignature,
   async (req, res) => {
     try {
-      const { jobId } = req.body;
+      const { jobId, sectionIndex } = req.body;
       if (!jobId) return res.status(400).json({ error: "Missing jobId" });
 
-      await executeNextStep(jobId);
+      const parsedSectionIndex = sectionIndex !== undefined ? parseInt(sectionIndex) : undefined;
+      await executeNextStep(jobId, parsedSectionIndex);
 
       res.status(200).json({ success: true });
     } catch (error: any) {

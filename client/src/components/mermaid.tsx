@@ -2,6 +2,14 @@
 
 import { use, useEffect, useId, useState, useRef } from 'react';
 import { useTheme } from 'next-themes';
+import { Maximize2 } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
 
 export function Mermaid({ 
   chart, 
@@ -141,6 +149,7 @@ function MermaidContent({
   const [svgContent, setSvgContent] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const { default: mermaid } = use(
     cachePromise('mermaid', () => import('mermaid')),
@@ -322,7 +331,7 @@ function MermaidContent({
         panzoomRef.current = null;
       }
     };
-  }, [svgContent]);
+  }, [svgContent, isFullscreen]);
 
   if (isLoading) {
     return (
@@ -342,19 +351,31 @@ function MermaidContent({
 
   return (
     <div className={margin ? "mermaid-pan-zoom-container" : ""}>
-      <div
-        ref={containerRef}
-        className="mermaid-svg-wrapper"
-        style={{
-          border: border ? `1px solid ${resolvedTheme === 'dark' ? '#1a1a1a' : '#e5e7eb'}` : 'none',
-          borderRadius: border ? '0.5rem' : '0',
-          overflow: 'hidden',
-          background: resolvedTheme === 'dark' ? '#0a0a0a' : '#ffffff',
-          minHeight: '400px',
-          cursor: 'grab',
-        }}
-        dangerouslySetInnerHTML={{ __html: svgContent }}
-      />
+      <div className="relative group">
+        <div
+          ref={containerRef}
+          className="mermaid-svg-wrapper"
+          style={{
+            border: border ? `1px solid ${resolvedTheme === 'dark' ? '#1a1a1a' : '#e5e7eb'}` : 'none',
+            borderRadius: border ? '0.5rem' : '0',
+            overflow: 'hidden',
+            background: resolvedTheme === 'dark' ? '#0a0a0a' : '#ffffff',
+            minHeight: '400px',
+            cursor: 'grab',
+          }}
+          dangerouslySetInnerHTML={{ __html: svgContent }}
+        />
+
+        <div className="absolute top-2 right-2 z-10 transition-opacity opacity-100 md:opacity-0 md:group-hover:opacity-100">
+          <button
+            onClick={() => setIsFullscreen(true)}
+            className="p-1.5 bg-background/85 hover:bg-muted text-foreground border rounded-md shadow-sm transition-colors cursor-pointer"
+            title="Expand diagram"
+          >
+            <Maximize2 className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
 
       {/* Add controls hint */}
       <div className="flex items-center justify-between mt-2 text-xs text-muted-foreground">
@@ -371,6 +392,12 @@ function MermaidContent({
           Reset View
         </button>
       </div>
+
+      <Dialog open={isFullscreen} onOpenChange={setIsFullscreen}>
+        <DialogContent className="max-w-[90vw] w-[90vw] md:max-w-[85vw] md:w-[85vw] h-[85vh] flex flex-col p-6 pt-10">
+          <MermaidDialogContent svgContent={svgContent} resolvedTheme={resolvedTheme || 'dark'} />
+        </DialogContent>
+      </Dialog>
 
       {/* Add custom styles */}
       <style jsx>{`
@@ -393,19 +420,89 @@ function MermaidContent({
           cursor: grabbing;
         }
         
-        .mermaid-svg-wrapper svg {
+        .mermaid-svg-wrapper :global(svg) {
           max-width: 100%;
           height: auto;
           display: block;
         }
 
-        .mermaid-svg-wrapper svg text,
-        .mermaid-svg-wrapper svg .label,
-        .mermaid-svg-wrapper svg .edgeLabel span {
+        .mermaid-svg-wrapper :global(svg text),
+        .mermaid-svg-wrapper :global(svg .label),
+        .mermaid-svg-wrapper :global(svg .edgeLabel span) {
           font-family: "Plus Jakarta Sans", sans-serif !important;
           font-size: 14px !important;
           font-weight: 600 !important;
           text-anchor: middle !important;
+        }
+      `}</style>
+    </div>
+  );
+}
+
+function MermaidDialogContent({ svgContent, resolvedTheme }: { svgContent: string; resolvedTheme: string }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const panzoomRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (containerRef.current && svgContent && !panzoomRef.current) {
+      import('panzoom').then((panzoomModule) => {
+        const svgElement = containerRef.current?.querySelector('svg');
+        if (svgElement) {
+          try {
+            panzoomRef.current = panzoomModule.default(svgElement, {
+              zoomSpeed: 0.1,
+              minZoom: 0.2,
+              maxZoom: 8,
+              filterKey: () => false, // Disable keyboard controls
+            });
+          } catch (error) {
+            console.error('Error initializing panzoom in dialog:', error);
+          }
+        }
+      });
+    }
+
+    return () => {
+      if (panzoomRef.current) {
+        try {
+          panzoomRef.current.dispose();
+        } catch (e) {
+          console.warn('Error disposing panzoom in dialog:', e);
+        }
+        panzoomRef.current = null;
+      }
+    };
+  }, [svgContent]);
+
+  return (
+    <div className="flex-1 w-full h-full relative flex items-center justify-center overflow-hidden bg-background/50 border rounded-md min-h-[60vh] max-h-[75vh] cursor-grab active:cursor-grabbing">
+      <div
+        ref={containerRef}
+        className="w-full h-full flex items-center justify-center p-8 dialog-mermaid-wrapper"
+        dangerouslySetInnerHTML={{ __html: svgContent }}
+      />
+      <div className="absolute bottom-4 left-4 text-xs text-muted-foreground bg-background/80 px-2 py-1 rounded border">
+        💡 Drag to pan, Scroll to zoom
+      </div>
+      <button
+        onClick={() => {
+          if (panzoomRef.current) {
+            panzoomRef.current.moveTo(0, 0);
+            panzoomRef.current.zoomAbs(0, 0, 1);
+          }
+        }}
+        className="absolute bottom-4 right-4 px-2 py-1 text-xs bg-muted hover:bg-muted/80 rounded border transition-colors cursor-pointer"
+      >
+        Reset View
+      </button>
+
+      <style jsx global>{`
+        .dialog-mermaid-wrapper svg {
+          width: 100% !important;
+          height: 100% !important;
+          max-width: none !important;
+          max-height: none !important;
+          display: block;
         }
       `}</style>
     </div>

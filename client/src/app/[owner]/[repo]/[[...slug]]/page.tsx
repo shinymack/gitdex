@@ -70,10 +70,12 @@ export default async function Page({ params }: PageProps) {
 
   const MdxContent = compiled.body;
 
+  const defaultBranch = source.meta?.defaultBranch || 'main';
+
   return (
     <DocsPage full={page.url === '/'} toc={toc}>
       <DocsBody>
-        <MdxContent components={getMDXComponents({})} />
+        <MdxContent components={getMDXComponents({ owner, repo, defaultBranch } as any)} />
       </DocsBody>
     </DocsPage>
   );

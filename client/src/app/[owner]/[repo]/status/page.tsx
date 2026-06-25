@@ -29,8 +29,10 @@ export default function StatusPage() {
   const fetchStatus = useCallback(async () => {
     try {
       const res = await fetch(`/api/status?owner=${owner}&repo=${repo}`);
-      if (!res.ok) throw new Error('Failed to check status');
       const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to check status');
+      }
 
       if (data.indexed) {
         router.push(`/${owner}/${repo}`);
@@ -59,9 +61,9 @@ export default function StatusPage() {
 
       setJobState('not-indexed');
       return true;
-    } catch (e) {
+    } catch (e: any) {
       setJobState('failed');
-      setError('Failed to connect to the server.');
+      setError(e.message || 'Failed to connect to the server.');
       return true;
     }
   }, [owner, repo, router]);

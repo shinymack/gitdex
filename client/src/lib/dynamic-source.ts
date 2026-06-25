@@ -24,6 +24,7 @@ export class DynamicDocsSource {
     private pageTree: PageTree.Root;
     private owner: string;
     private repo: string;
+    public meta: any = {};
 
     constructor(owner: string, repo: string) {
         this.owner = owner;
@@ -36,6 +37,7 @@ export class DynamicDocsSource {
 
     async initialize() {
         const docs = await getGithubDocs(this.owner, this.repo);
+        this.meta = docs.meta;
 
         this.pages = docs.files
             .filter(file => file.path.endsWith('.mdx') && !file.path.includes('meta.json'))

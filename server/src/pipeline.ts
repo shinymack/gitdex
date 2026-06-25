@@ -14,31 +14,32 @@ interface PipelineData {
     toc: any[];
     generatedFiles: { filename: string; content: string }[];
     sectionsWritten: number;
+    defaultBranch?: string;
 }
 
-async function triggerNextStep(jobId: string, delay?: any) {
+async function triggerNextStep(jobId: string, delay?: any, sectionIndex?: number) {
     const baseUrl = process.env.BASE_URL;
     if (!baseUrl) throw new Error("BASE_URL missing for QStash");
 
     await qstash.publishJSON({
         url: `${baseUrl}/api/pipeline/step`,
-        body: { jobId },
+        body: { jobId, sectionIndex },
         retries: 2,
         ...(delay ? { delay } : {})
     });
 }
 
-export async function executeNextStep(jobId: string) {
-    const acquiredLock = await queue.acquireStepLock(jobId);
+export async function executeNextStep(jobId: string, sectionIndex?: number) {
+    const acquiredLock = await queue.acquireStepLock(jobId, sectionIndex);
 
     if (!acquiredLock) {
-        console.log(`[Pipeline] Step already in progress for ${jobId}. Skipping duplicate.`);
+        console.log(`[Pipeline] Step already in progress for ${jobId} (section: ${sectionIndex ?? 'all'}). Skipping duplicate.`);
         return;
     }
 
     const job = await queue.getJob(jobId);
     if (!job || job.state !== 'processing') {
-        await queue.releaseStepLock(jobId);
+        await queue.releaseStepLock(jobId, sectionIndex);
         return;
     }
 
@@ -69,12 +70,19 @@ export async function executeNextStep(jobId: string) {
                 break;
             case 1:
                 await planStructure(job, data);
-                await triggerNextStep(job.id);
+                // Trigger first 5 sections in parallel (indices 0 to Math.min(5, N) - 1)
+                const numSections = data.toc.length;
+                await redis.set(`job:${job.owner}/${job.repo}:completed_sections`, '0');
+                const initialWorkers = Math.min(5, numSections);
+                for (let i = 0; i < initialWorkers; i++) {
+                    await triggerNextStep(job.id, undefined, i);
+                }
                 break;
             case 2:
-                await writeSections(job, data);
-                const isFinished = data.sectionsWritten >= data.toc.length;
-                await triggerNextStep(job.id, isFinished ? undefined : "5s");
+                if (sectionIndex === undefined) {
+                    throw new Error("Missing sectionIndex for step 2 execution");
+                }
+                await writeSingleSection(job, data, sectionIndex);
                 break;
             case 3:
                 await commitToGithub(job, data);
@@ -82,10 +90,10 @@ export async function executeNextStep(jobId: string) {
                 break;
         }
     } catch (error: any) {
-        console.error(`Pipeline failed at step ${job.currentStep} for ${jobId}:`, error.message);
+        console.error(`Pipeline failed at step ${job.currentStep} for ${jobId} (section: ${sectionIndex ?? 'all'}):`, error.message);
         nextJobId = await queue.failJob(jobId, error.message); // Fail current job, get next job ID
     } finally {
-        await queue.releaseStepLock(jobId);
+        await queue.releaseStepLock(jobId, sectionIndex);
     }
 
     // SAFELY TRIGGER THE NEXT JOB (ISOLATED TRY/CATCH)
@@ -104,6 +112,7 @@ export async function executeNextStep(jobId: string) {
 async function scanRepository(job: any, data: PipelineData) {
     console.log(`[Pipeline] Step 0: Scanning ${job.owner}/${job.repo}`);
     const { data: repoData } = await octokit.rest.repos.get({ owner: job.owner, repo: job.repo });
+    data.defaultBranch = repoData.default_branch || 'main';
 
     const { data: treeData } = await octokit.rest.git.getTree({
         owner: job.owner,
@@ -116,12 +125,41 @@ async function scanRepository(job: any, data: PipelineData) {
         item.type === 'blob' &&
         item.path?.match(/\.(js|ts|jsx|tsx|md|json|py|rb|go|rs|java|cpp|h|c|cs|php|css|html|sql|yaml|yml)$/i) &&
         (item.size || 0) < 1000000 &&
-        !item.path.match(/\b(node_modules|dist|build|\.git|__pycache__|\.lock|\.min\.js|\.bundle\.js)\b/i)
+        !item.path.match(/\b(node_modules|dist|build|\.git|__pycache__|\.lock|package-lock|bun\.lockb|yarn\.lock|pnpm-lock|\.min\.js|\.bundle\.js)\b/i) &&
+        !item.path.includes('/components/ui/')
     );
 
-    const topFiles = relevantFiles.slice(0, 50);
+    // Group files by top-level directory for round-robin sampling
+    const groups: { [key: string]: any[] } = {};
+    for (const file of relevantFiles) {
+        if (!file.path) continue;
+        const parts = file.path.split('/');
+        const dir = (parts.length > 1 ? parts[0] : '.') || '.';
+        if (!groups[dir]) groups[dir] = [];
+        groups[dir].push(file);
+    }
+
+    const sampledFiles = [];
+    const dirs = Object.keys(groups);
+    let index = 0;
+    while (sampledFiles.length < 50 && dirs.length > 0) {
+        const currentDir = dirs[index % dirs.length];
+        if (!currentDir) {
+            dirs.splice(index % dirs.length, 1);
+            continue;
+        }
+        const file = (groups[currentDir] || []).shift();
+        if (file) {
+            sampledFiles.push(file);
+        } else {
+            dirs.splice(index % dirs.length, 1);
+            continue;
+        }
+        index++;
+    }
+
     const files = [];
-    for (const file of topFiles) {
+    for (const file of sampledFiles) {
         try {
             const fileResponse = await octokit.rest.repos.getContent({
                 owner: job.owner,
@@ -144,7 +182,27 @@ async function planStructure(job: any, data: PipelineData) {
     console.log(`[Pipeline] Step 1: Planning TOC for ${job.owner}/${job.repo}`);
     const filePaths = data.files.map((f: any) => f.path).join('\n');
 
-    const prompt = `You are GitDex, an expert in repo analysis. From these file paths in ${job.owner}/${job.repo}:\n${filePaths}\n\nGenerate a hierarchical table of contents for documentation with 4-8 top-level sections. Use numeric prefixes (e.g., 1., 2.1.). For each section, provide prefix, title, filename (prefix_title.mdx), description, and relevant_files (2-4 paths). Output as a valid JSON array ONLY.`;
+    const prompt = `You are GitDex, an expert technical writer and repository analyst.
+Analyze these file paths in the ${job.owner}/${job.repo} project:
+${filePaths}
+
+First, profile the repository's architecture (determine if it is a monorepo, full-stack app, backend service, frontend client, library, CLI, etc.).
+Based on that profile, generate a hierarchical table of contents for its documentation with 5 to 12 top-level sections.
+
+When designing the structure, plan sections that would benefit from visual diagrams, such as:
+- Architecture overviews
+- Data flows and database schemas
+- Component relationships
+- Process workflows and state transitions
+
+For each section in the documentation, provide:
+- prefix: Numeric prefix (e.g., "1", "2.1", etc.)
+- title: Section title (e.g., "Architecture Overview", "Database Schema", etc.)
+- filename: Mapped filename formatted as "prefix_title.mdx" (replace spaces with hyphens, lowercase)
+- description: A brief summary of what this section covers
+- relevant_files: An array of 2 to 5 actual file paths from the provided list that are most relevant to this section
+
+Output your final response as a valid JSON array of objects ONLY. Do not include markdown code block formatting (do not wrap in \`\`\`json).`;
 
     const tocText = await generateWithRetry({ prompt });
     const cleanedToc = tocText.replace(/```json\n?|\n?```/g, '').trim();
@@ -162,10 +220,14 @@ async function planStructure(job: any, data: PipelineData) {
     await queue.updateJob(job.id, { currentStep: 2, data: JSON.stringify(data) });
 }
 
-async function writeSections(job: any, data: PipelineData) {
-    console.log(`[Pipeline] Step 2: Writing section ${data.sectionsWritten + 1}/${data.toc.length} for ${job.owner}/${job.repo}`);
+async function writeSingleSection(job: any, data: PipelineData, sectionIndex: number) {
+    const entry = data.toc[sectionIndex];
+    if (!entry) {
+        throw new Error(`Section entry not found at index ${sectionIndex}`);
+    }
 
-    const entry = data.toc[data.sectionsWritten];
+    console.log(`[Pipeline] Step 2: Writing section ${sectionIndex + 1}/${data.toc.length} for ${job.owner}/${job.repo}`);
+
     const relevantContents = data.files.filter((f: any) => entry.relevant_files.includes(f.path));
 
     const maxTokens = 100000;
@@ -181,21 +243,62 @@ async function writeSections(job: any, data: PipelineData) {
     }
     const contentBlock = truncatedContents.join('');
 
-    const prompt = `You are GitDex, an expert technical writer. Generate production-ready MDX documentation for ${job.owner}/${job.repo}.\nSection: ${entry.title}\nDescription: ${entry.description}\nCode Context:\n${contentBlock}\n\nSTRICT RULES: Valid MDX only. No frontmatter. Start with "# ${entry.title}". Include 1 Mermaid diagram if relevant (use graph TD, quoted nodes A["User"] --> B["API"], standard arrows). No images. Output ONLY the MDX body.`;
+    const fullTocContext = JSON.stringify(data.toc, null, 2);
+
+    const prompt = `You are GitDex, an expert technical writer and software architect.
+Generate a comprehensive, accurate, and production-ready technical documentation page in Markdown/MDX format about a specific module within the project ${job.owner}/${job.repo}.
+
+The page you need to create:
+Section Title: "${entry.title}"
+Section Description: "${entry.description}"
+
+To help you understand the context and prevent repeating information, here is the full planned Table of Contents for this project's documentation:
+<global_toc>
+${fullTocContext}
+</global_toc>
+
+Use the following source files from the project as the sole basis for the content:
+<source_files>
+${contentBlock}</source_files>
+
+CRITICAL RULES FOR GENERATION:
+
+1. STRUCTURE & LAYOUT:
+- Do not provide any conversational preamble, greeting, or introductory filler (e.g., do not say "Here is the documentation..."). Start directly with the content.
+- No frontmatter blocks.
+- Start directly with a H1 heading: "# ${entry.title}".
+- Break the page down into logical sections using H2 (##) and H3 (###) headings.
+
+2. FACTUAL GROUNDING:
+- Base all information strictly on the provided source files. Do not speculate, guess, or invent features not explicitly present in the code.
+- Cover at least 5 different source files from the available list across the document to ensure comprehensive code coverage (or cover all of them if fewer than 5 exist).
+
+3. MERMAID DIAGRAMS:
+- Include 1 or 2 visual Mermaid diagrams (e.g., flowchart TD, flowchart LR, sequenceDiagram, classDiagram, erDiagram) to represent component interactions or data flow.
+- Support both top-down ("graph TD") and left-to-right ("graph LR") layout directives.
+- Quote all node labels (e.g., A["My Label"]) to prevent syntax errors from special characters.
+- Keep node label text short (maximum 3-4 words).
+- For sequence diagrams:
+  - Start with "sequenceDiagram" on its own line.
+  - Define all participants using the "participant" keyword at the top.
+  - Use correct Mermaid arrow notations: ->> (calls/requests), -->> (responses/returns), -) (async messages).
+  - Use activation/deactivation markers (+/- suffix) and autonumber directive.
+  - Use loop/alt/opt/par/critical/break blocks for complex control flows.
+
+4. TABLES & CODE SNIPPETS:
+- Use Markdown tables to describe key API endpoints, data fields, or configuration options.
+- Keep code snippets brief, well-formatted, and directly extracted from the source files.
+
+5. OUTPUT:
+- Output ONLY the raw Markdown/MDX body. Do not wrap the entire response in outer markdown code fences (\`\`\`md or \`\`\`mdx).`;
 
     let mdxContent = await generateWithRetry({ prompt });
 
-    // Strip outer code fence wrapper if the model wrapped the entire response.
-    // No 'm' flag: ^ and $ must anchor to the entire string, not per-line,
-    // otherwise the regex matches and strips the first closing ``` in the content
-    // (e.g. the mermaid block's closing fence) instead of a trailing wrapper.
     mdxContent = mdxContent
         .replace(/^```(?:mdx|markdown|md)\n?/, '')
         .replace(/\n?```\s*$/, '')
         .trim();
 
-    // Strip ALL leading frontmatter blocks the model may have included,
-    // then prepend our own controlled frontmatter
     while (mdxContent.startsWith('---')) {
         const closeIndex = mdxContent.indexOf('---', 3);
         if (closeIndex === -1) break;
@@ -205,13 +308,42 @@ async function writeSections(job: any, data: PipelineData) {
     const sidebarPosition = entry.prefix.endsWith('.') ? parseInt(entry.prefix.replace('.', '')) : parseFloat(entry.prefix);
     const finalContent = `---\ntitle: "${entry.title}"\ndescription: "${entry.description}"\nsidebar_position: ${sidebarPosition}\n---\n${mdxContent}`;
 
-    data.generatedFiles.push({ filename: entry.filename, content: finalContent });
-    data.sectionsWritten++;
+    const sectionField = `section:${sectionIndex}`;
+    await redis.hset(job.id, { [sectionField]: JSON.stringify({ filename: entry.filename, content: finalContent }) });
 
-    if (data.sectionsWritten >= data.toc.length) {
+    const nextIndex = sectionIndex + 5;
+    if (nextIndex < data.toc.length) {
+        await triggerNextStep(job.id, undefined, nextIndex);
+    }
+
+    const jobHash = (await redis.hgetall(job.id)) || {};
+    const completedSections = Object.keys(jobHash).filter((k) => k.startsWith('section:'));
+    const completedCount = completedSections.length;
+
+    console.log(`[Pipeline] Section ${sectionIndex + 1}/${data.toc.length} written for ${job.owner}/${job.repo}. Completed count: ${completedCount}`);
+
+    await queue.updateJob(job.id, {});
+
+    if (completedCount === data.toc.length) {
+        console.log(`[Pipeline] All sections written for ${job.owner}/${job.repo}. Fan-in gathering files.`);
+        
+        const generatedFiles: { filename: string; content: string }[] = [];
+        for (let i = 0; i < data.toc.length; i++) {
+            const fileData = jobHash[`section:${i}`];
+            if (fileData) {
+                generatedFiles.push(typeof fileData === 'string' ? JSON.parse(fileData) : fileData);
+            }
+        }
+
+        data.generatedFiles = generatedFiles;
+        data.sectionsWritten = completedCount;
+
+        if (completedSections.length > 0) {
+            await redis.hdel(job.id, ...completedSections);
+        }
+
         await queue.updateJob(job.id, { currentStep: 3, data: JSON.stringify(data) });
-    } else {
-        await queue.updateJob(job.id, { currentStep: 2, data: JSON.stringify(data) });
+        await triggerNextStep(job.id);
     }
 }
 
@@ -226,7 +358,13 @@ async function commitToGithub(job: any, data: PipelineData) {
         path: `${docsPath}/meta.json`,
         mode: '100644',
         type: 'blob',
-        content: JSON.stringify({ title: `${job.repo} Documentation`, description: `Documentation for ${job.owner}/${job.repo}`, icon: "book", root: true }, null, 2)
+        content: JSON.stringify({ 
+            title: `${job.repo} Documentation`, 
+            description: `Documentation for ${job.owner}/${job.repo}`, 
+            icon: "book", 
+            root: true,
+            defaultBranch: data.defaultBranch || 'main'
+        }, null, 2)
     }];
 
     for (const { filename, content } of data.generatedFiles) {

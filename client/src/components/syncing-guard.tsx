@@ -14,6 +14,7 @@ interface SyncingGuardProps {
 
 export function SyncingGuard({ owner, repo }: SyncingGuardProps) {
   const [status, setStatus] = useState<'loading' | 'indexing' | 'not_found' | 'error'>('loading');
+  const [errorMessage, setErrorMessage] = useState<string>('');
 
   useEffect(() => {
     let intervalId: NodeJS.Timeout;
@@ -21,9 +22,11 @@ export function SyncingGuard({ owner, repo }: SyncingGuardProps) {
     const checkStatus = async () => {
       try {
         const res = await fetch(`/api/status?owner=${owner}&repo=${repo}`);
-        if (!res.ok) throw new Error('Failed to check status');
-
         const data = await res.json();
+        
+        if (!res.ok) {
+          throw new Error(data.error || 'Failed to check status');
+        }
 
         if (data.job?.state === 'processing' || data.job?.state === 'queued') {
           setStatus('indexing');
@@ -39,8 +42,9 @@ export function SyncingGuard({ owner, repo }: SyncingGuardProps) {
           setStatus('not_found');
         }
 
-      } catch (e) {
+      } catch (e: any) {
         setStatus('error');
+        setErrorMessage(e.message || 'Something went wrong checking the status.');
       }
     };
 
@@ -87,10 +91,20 @@ export function SyncingGuard({ owner, repo }: SyncingGuardProps) {
   }
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
-      <AlertCircle className="w-10 h-10 text-muted-foreground mb-4" />
-      <p>Something went wrong checking the status.</p>
-      <Button variant="link" onClick={() => window.location.reload()}>Retry</Button>
+    <div className="flex flex-col items-center justify-center min-h-[60vh] text-center px-4">
+      <div className="bg-destructive/10 p-4 rounded-full mb-4">
+        <AlertCircle className="w-8 h-8 text-destructive" />
+      </div>
+      <h2 className="text-2xl font-bold mb-2">Error Checking Status</h2>
+      <p className="text-muted-foreground max-w-md mb-8 font-mono text-sm bg-destructive/5 p-3 rounded border border-destructive/10">
+        {errorMessage || 'Something went wrong checking the status.'}
+      </p>
+      <div className="flex gap-4 justify-center">
+        <Link href="/">
+          <Button variant="outline">Go Home</Button>
+        </Link>
+        <Button onClick={() => window.location.reload()}>Retry</Button>
+      </div>
     </div>
   );
 }

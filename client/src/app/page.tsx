@@ -109,6 +109,10 @@ export default function HomePage() {
       const res = await fetch(`/api/status?owner=${owner}&repo=${repo}`);
       const data = await res.json();
 
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to check status');
+      }
+
       if (data.indexed || data.lastIndexed) {
         window.location.href = data.path || `/${owner}/${repo}`;
       } else {
