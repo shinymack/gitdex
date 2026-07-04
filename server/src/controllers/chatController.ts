@@ -56,9 +56,9 @@ Use the provided tools to explore the codebase and answer questions accurately.
 ${fileTree}
 
 ## Rules
-1. Use tools to explore files before answering questions about code.
-2. Prefer reading actual files over guessing. You can read up to 5 files at once using the "readFiles" tool. Use this whenever you need to search or check multiple files to save tool call turns.
-3. Prefer the batch "readFiles" tool over calling the single "readFile" tool multiple times.
+1. Use the "searchCode" tool to locate files containing specific terms, functions, or variable names before reading them.
+2. Use the "readFiles" tool to read the contents of files. You can read up to 5 files at once. Always batch your file reading to save tool call turns.
+3. To read a single file, pass a single item list to "readFiles" (e.g. ["path/to/file.ext"]).
 4. Keep answers concise and developer-focused.
 5. If you cannot find something after several tool uses, say so clearly.
 `;
@@ -80,32 +80,14 @@ ${fileTree}
                             if (Array.isArray(data)) {
                                 return { files: data.map(i => ({ name: i.name, type: i.type })) };
                             }
-                            return { error: 'Path is a file, not a directory. Use readFile instead.' };
-                        } catch (e: any) {
-                            return { error: e.message };
-                        }
-                    },
-                }),
-                readFile: tool({
-                    description: 'Read the content of a single file in the repository',
-                    inputSchema: z.object({
-                        path: z.string().describe('File path to read, e.g. "src/index.ts"'),
-                    }),
-                    execute: async ({ path }) => {
-                        try {
-                            const { data } = await octokit.rest.repos.getContent({ owner, repo, path });
-                            if ('content' in data && data.encoding === 'base64') {
-                                const content = Buffer.from(data.content, 'base64').toString('utf-8');
-                                return { content: content.slice(0, 15000) + (content.length > 15000 ? '\n...[truncated]' : '') };
-                            }
-                            return { error: 'File not found or is binary.' };
+                            return { error: 'Path is a file, not a directory. Use readFiles instead.' };
                         } catch (e: any) {
                             return { error: e.message };
                         }
                     },
                 }),
                 readFiles: tool({
-                    description: 'Read the content of multiple files in the repository (up to 5 files at once)',
+                    description: 'Read the content of one or more files in the repository (up to 5 files at once)',
                     inputSchema: z.object({
                         paths: z.array(z.string()).describe('List of file paths to read, e.g. ["src/index.ts", "src/utils.ts"]'),
                     }),
@@ -129,6 +111,27 @@ ${fileTree}
                                 })
                             );
                             return { files: results };
+                        } catch (e: any) {
+                            return { error: e.message };
+                        }
+                    },
+                }),
+                searchCode: tool({
+                    description: 'Search for text or keywords across all files in the repository',
+                    inputSchema: z.object({
+                        query: z.string().describe('Search query term, e.g. "SimpleQueue" or "hset"'),
+                    }),
+                    execute: async ({ query }) => {
+                        try {
+                            const { data } = await octokit.rest.search.code({
+                                q: `${query} repo:${owner}/${repo}`,
+                            });
+                            return {
+                                matches: data.items.map(item => ({
+                                    path: item.path,
+                                    name: item.name,
+                                })),
+                            };
                         } catch (e: any) {
                             return { error: e.message };
                         }
