@@ -98,7 +98,7 @@ export default function InteractiveConstellation() {
       if (typeof window === 'undefined') return { r: 16, g: 185, b: 129 };
       try {
         const style = getComputedStyle(document.documentElement);
-        const primary = style.getPropertyValue('--primary').trim();
+        const primary = (style.getPropertyValue('--primary') || '').trim();
         if (primary.startsWith('#')) {
           return {
             r: parseInt(primary.slice(1, 3), 16),

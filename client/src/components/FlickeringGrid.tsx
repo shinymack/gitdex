@@ -90,8 +90,7 @@ export function FlickeringGrid({
       if (typeof window === 'undefined') return { r: 16, g: 185, b: 129 }; // fallback emerald
       try {
         const style = getComputedStyle(document.documentElement);
-        const primary = style.getPropertyValue('--primary').trim();
-        // Parse hex or hsl. The CSS variables in globals.css use HEX.
+        const primary = (style.getPropertyValue('--primary') || '').trim();
         if (primary.startsWith('#')) {
           const r = parseInt(primary.slice(1, 3), 16);
           const g = parseInt(primary.slice(3, 5), 16);

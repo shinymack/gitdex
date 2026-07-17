@@ -1,4 +1,4 @@
-import queue, { redis } from "./queue.js";
+import queue, { redis, type JobData } from "./queue.js";
 import { generateWithRetry } from "./ai.js";
 import { Octokit } from "@octokit/rest";
 import { encodingForModel } from "js-tiktoken";
@@ -9,15 +9,23 @@ const tiktoken = encodingForModel('gpt-4');
 
 const qstash = new Client({ token: process.env.QSTASH_TOKEN! });
 
+interface TocEntry {
+    prefix: string;
+    title: string;
+    filename: string;
+    description: string;
+    relevant_files: string[];
+}
+
 interface PipelineData {
     files: { path: string; content: string }[];
-    toc: any[];
+    toc: TocEntry[];
     generatedFiles: { filename: string; content: string }[];
     sectionsWritten: number;
     defaultBranch?: string;
 }
 
-async function triggerNextStep(jobId: string, delay?: any, sectionIndex?: number) {
+async function triggerNextStep(jobId: string, sectionIndex?: number) {
     const baseUrl = process.env.BASE_URL;
     if (!baseUrl) throw new Error("BASE_URL missing for QStash");
 
@@ -25,7 +33,6 @@ async function triggerNextStep(jobId: string, delay?: any, sectionIndex?: number
         url: `${baseUrl}/api/pipeline/step`,
         body: { jobId, sectionIndex },
         retries: 2,
-        ...(delay ? { delay } : {})
     });
 }
 
@@ -75,7 +82,7 @@ export async function executeNextStep(jobId: string, sectionIndex?: number) {
                 await redis.set(`job:${job.owner}/${job.repo}:completed_sections`, '0');
                 const initialWorkers = Math.min(5, numSections);
                 for (let i = 0; i < initialWorkers; i++) {
-                    await triggerNextStep(job.id, undefined, i);
+                    await triggerNextStep(job.id, i);
                 }
                 break;
             case 2:
@@ -109,7 +116,13 @@ export async function executeNextStep(jobId: string, sectionIndex?: number) {
     }
 }
 
-async function scanRepository(job: any, data: PipelineData) {
+interface RepoItem {
+    type?: string;
+    path?: string;
+    size?: number;
+}
+
+async function scanRepository(job: JobData, data: PipelineData) {
     console.log(`[Pipeline] Step 0: Scanning ${job.owner}/${job.repo}`);
     const { data: repoData } = await octokit.rest.repos.get({ owner: job.owner, repo: job.repo });
     data.defaultBranch = repoData.default_branch || 'main';
@@ -121,7 +134,7 @@ async function scanRepository(job: any, data: PipelineData) {
         recursive: 'true'
     });
 
-    const relevantFiles = treeData.tree.filter((item: any) =>
+    const relevantFiles = (treeData.tree as RepoItem[]).filter((item) =>
         item.type === 'blob' &&
         item.path?.match(/\.(js|ts|jsx|tsx|md|json|py|rb|go|rs|java|cpp|h|c|cs|php|css|html|sql|yaml|yml)$/i) &&
         (item.size || 0) < 1000000 &&
@@ -130,7 +143,7 @@ async function scanRepository(job: any, data: PipelineData) {
     );
 
     // Group files by top-level directory for round-robin sampling
-    const groups: { [key: string]: any[] } = {};
+    const groups: { [key: string]: RepoItem[] } = {};
     for (const file of relevantFiles) {
         if (!file.path) continue;
         const parts = file.path.split('/');
@@ -139,7 +152,7 @@ async function scanRepository(job: any, data: PipelineData) {
         groups[dir].push(file);
     }
 
-    const sampledFiles = [];
+    const sampledFiles: RepoItem[] = [];
     const dirs = Object.keys(groups);
     let index = 0;
     while (sampledFiles.length < 50 && dirs.length > 0) {
@@ -158,21 +171,43 @@ async function scanRepository(job: any, data: PipelineData) {
         index++;
     }
 
-    const files = [];
-    for (const file of sampledFiles) {
-        try {
-            const fileResponse = await octokit.rest.repos.getContent({
-                owner: job.owner,
-                repo: job.repo,
-                path: file.path,
-                mediaType: { format: 'raw' },
-            });
-            const rawContent = typeof fileResponse.data === 'string'
-                ? fileResponse.data
-                : (fileResponse.data as any).toString();
-            files.push({ path: file.path, content: rawContent });
-        } catch (e) { /* skip */ }
+    const files: { path: string; content: string }[] = [];
+    const concurrency = 10;
+    const queueList = [...sampledFiles];
+    const workers: Promise<void>[] = [];
+
+    const worker = async () => {
+        while (queueList.length > 0) {
+            const file = queueList.shift();
+            if (!file || !file.path) continue;
+            try {
+                const fileResponse = await octokit.rest.repos.getContent({
+                    owner: job.owner,
+                    repo: job.repo,
+                    path: file.path,
+                    mediaType: { format: 'raw' },
+                });
+                
+                const rawData = fileResponse.data;
+                const rawContent = typeof rawData === 'string'
+                    ? rawData
+                    : String(rawData);
+                    
+                files.push({ path: file.path, content: rawContent });
+            } catch (e) {
+                // skip
+            }
+        }
+    };
+
+    const { promise, resolve } = Promise.withResolvers<void>();
+    
+    for (let i = 0; i < Math.min(concurrency, sampledFiles.length); i++) {
+        workers.push(worker());
     }
+    
+    Promise.all(workers).then(() => resolve());
+    await promise;
 
     data.files = files;
     await queue.updateJob(job.id, { currentStep: 1, data: JSON.stringify(data) });
@@ -313,7 +348,7 @@ CRITICAL RULES FOR GENERATION:
 
     const nextIndex = sectionIndex + 5;
     if (nextIndex < data.toc.length) {
-        await triggerNextStep(job.id, undefined, nextIndex);
+        await triggerNextStep(job.id, nextIndex);
     }
 
     const jobHash = (await redis.hgetall(job.id)) || {};

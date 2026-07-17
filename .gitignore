@@ -36,3 +36,6 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 /client/digest.txt
 /server/digest.txt
+
+# local docs
+docs/

@@ -38,7 +38,6 @@ function stripFrontmatter(content: string): string {
 
 export default async function Page({ params }: PageProps) {
   const { owner, repo, slug = [] } = await params;
-
   if (slug.length === 0) {
     const source = new DynamicDocsSource(owner, repo);
     await source.initialize();

@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { google } from '@ai-sdk/google';
-import { streamText, tool, stepCountIs, convertToModelMessages } from 'ai';
+import { streamText, tool, stepCountIs, convertToModelMessages, generateText } from 'ai';
 import { Octokit } from '@octokit/rest';
 import { z } from 'zod';
 
@@ -63,8 +63,30 @@ ${fileTree}
 5. If you cannot find something after several tool uses, say so clearly.
 `;
 
+        const chatModels = (process.env.CHAT_MODELS || 'gemma-4-26b-a4b-it,gemma-4-31b-it')
+            .split(',')
+            .map(m => m.trim())
+            .filter(Boolean);
+
+        let selectedModel = chatModels[0] || 'gemma-4-26b-a4b-it';
+        for (const modelId of chatModels) {
+            try {
+                console.log(`[AI Chat] Probing model: ${modelId}`);
+                await generateText({
+                    model: google(modelId as unknown as Parameters<typeof google>[0]),
+                    prompt: '1',
+                });
+                console.log(`[AI Chat] Probe successful for model: ${modelId}`);
+                selectedModel = modelId;
+                break;
+            } catch (e: unknown) {
+                const err = e instanceof Error ? e : new Error(String(e));
+                console.warn(`[AI Chat] Probe failed for model ${modelId}: ${err.message}`);
+            }
+        }
+
         streamText({
-            model: google('gemma-4-26b-a4b-it'),
+            model: google(selectedModel as unknown as Parameters<typeof google>[0]),
             system: systemPrompt,
             messages: await convertToModelMessages(messages),
             maxRetries: 5,
@@ -81,8 +103,9 @@ ${fileTree}
                                 return { files: data.map(i => ({ name: i.name, type: i.type })) };
                             }
                             return { error: 'Path is a file, not a directory. Use readFiles instead.' };
-                        } catch (e: any) {
-                            return { error: e.message };
+                        } catch (e: unknown) {
+                            const err = e instanceof Error ? e : new Error(String(e));
+                            return { error: err.message };
                         }
                     },
                 }),
@@ -105,14 +128,16 @@ ${fileTree}
                                             };
                                         }
                                         return { path, error: 'File not found or is binary.' };
-                                    } catch (e: any) {
-                                        return { path, error: e.message };
+                                    } catch (e: unknown) {
+                                        const err = e instanceof Error ? e : new Error(String(e));
+                                        return { path, error: err.message };
                                     }
                                 })
                             );
                             return { files: results };
-                        } catch (e: any) {
-                            return { error: e.message };
+                        } catch (e: unknown) {
+                            const err = e instanceof Error ? e : new Error(String(e));
+                            return { error: err.message };
                         }
                     },
                 }),
@@ -132,8 +157,9 @@ ${fileTree}
                                     name: item.name,
                                 })),
                             };
-                        } catch (e: any) {
-                            return { error: e.message };
+                        } catch (e: unknown) {
+                            const err = e instanceof Error ? e : new Error(String(e));
+                            return { error: err.message };
                         }
                     },
                 }),

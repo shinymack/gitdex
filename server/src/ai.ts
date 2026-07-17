@@ -1,7 +1,10 @@
 import { generateText } from "ai";
 import { google } from "@ai-sdk/google";
 
-const MODEL_ID = "gemma-4-31b-it";
+const docsModels = (process.env.DOCS_MODELS || "gemma-4-31b-it,gemma-4-26b-a4b-it")
+  .split(",")
+  .map(m => m.trim())
+  .filter(Boolean);
 
 // Module-level throttle to prevent hitting 15 RPM limit
 let lastApiCallTimestamp = 0;
@@ -20,39 +23,51 @@ export async function generateWithRetry({
 }: GenerateOptions): Promise<string> {
   let lastError: Error | null = null;
 
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    try {
-      // Dynamic Throttle Logic
-      const now = Date.now();
-      const timeSinceLastCall = now - lastApiCallTimestamp;
-      
-      if (timeSinceLastCall < MIN_INTERVAL_MS) {
-        const waitTime = MIN_INTERVAL_MS - timeSinceLastCall;
-        console.log(`[AI Throttle] Waiting ${waitTime}ms to avoid rate limit...`);
-        await new Promise(resolve => setTimeout(resolve, waitTime));
-      }
+  for (const modelId of docsModels) {
+    console.log(`[AI] Attempting generation with model: ${modelId}`);
+    
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        // Dynamic Throttle Logic - synchronous reservation
+        const now = Date.now();
+        const targetTime = Math.max(now, lastApiCallTimestamp + MIN_INTERVAL_MS);
+        lastApiCallTimestamp = targetTime;
 
-      // Update timestamp right before firing
-      lastApiCallTimestamp = Date.now();
+        if (targetTime > now) {
+          const waitTime = targetTime - now;
+          console.log(`[AI Throttle] Waiting ${waitTime}ms to avoid rate limit...`);
+          const { promise, resolve } = Promise.withResolvers<void>();
+          setTimeout(resolve, waitTime);
+          await promise;
+        }
 
-      const result = await generateText({
-        model: google(MODEL_ID),
-        system: systemPrompt,
-        prompt: prompt,
-      });
-      return result.text;
-    } catch (error: any) {
-      lastError = error;
-      console.warn(`AI generation attempt ${attempt + 1} failed: ${error.message}`);
+        const result = await generateText({
+          model: google(modelId),
+          system: systemPrompt,
+          prompt: prompt,
+        });
+        return result.text;
+      } catch (error: unknown) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        lastError = err;
+        console.warn(`[AI] Model ${modelId} attempt ${attempt + 1} failed: ${err.message}`);
 
-      if (error.message.includes('429') || error.status === 429) {
-        // If we somehow still hit a 429, wait a full 10 seconds
-        await new Promise(resolve => setTimeout(resolve, 10000));
-      } else {
-        await new Promise(resolve => setTimeout(resolve, 2000 * Math.pow(2, attempt)));
+        const isRateLimit = err.message.includes('429') || 
+                            (typeof error === 'object' && error !== null && 'status' in error && error.status === 429);
+
+        if (isRateLimit) {
+          // If we somehow still hit a 429, wait a full 10 seconds
+          const { promise, resolve } = Promise.withResolvers<void>();
+          setTimeout(resolve, 10000);
+          await promise;
+        } else {
+          const { promise, resolve } = Promise.withResolvers<void>();
+          setTimeout(resolve, 2000 * Math.pow(2, attempt));
+          await promise;
+        }
       }
     }
   }
 
-  throw new Error(`AI generation failed after ${maxRetries} retries. Last error: ${lastError?.message}`);
+  throw new Error(`AI generation failed for all configured models. Last error: ${lastError?.message}`);
 }

@@ -26,7 +26,6 @@
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
-    "ioredis": "^5.11.1",
     "js-tiktoken": "^1.0.21",
     "mermaid": "^11.15.0"
   }
