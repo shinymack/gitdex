@@ -6,9 +6,9 @@ const docsModels = (process.env.DOCS_MODELS || "gemma-4-31b-it,gemma-4-26b-a4b-i
   .map(m => m.trim())
   .filter(Boolean);
 
-// Module-level throttle to prevent hitting 15 RPM limit
+// Module-level throttle driven by AI_THROTTLE_MS env var (defaults to 2000ms = 30 RPM max)
 let lastApiCallTimestamp = 0;
-const MIN_INTERVAL_MS = 4500; // 4.5 seconds = ~13 RPM (safely under 15)
+const MIN_INTERVAL_MS = parseInt(process.env.AI_THROTTLE_MS || "2000", 10);
 
 interface GenerateOptions {
   systemPrompt?: string;

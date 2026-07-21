@@ -4,6 +4,7 @@ import { Octokit } from "@octokit/rest";
 import { encodingForModel } from "js-tiktoken";
 import { Client } from "@upstash/qstash";
 
+import { processFiles, mergeConfigs } from "repomix";
 const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
 const tiktoken = encodingForModel('gpt-4');
 
@@ -25,15 +26,36 @@ interface PipelineData {
     defaultBranch?: string;
 }
 
-async function triggerNextStep(jobId: string, sectionIndex?: number) {
+async function triggerNextStep(jobId: string, sectionIndex?: number, delay?: number) {
     const baseUrl = process.env.BASE_URL;
     if (!baseUrl) throw new Error("BASE_URL missing for QStash");
 
     await qstash.publishJSON({
         url: `${baseUrl}/api/pipeline/step`,
         body: { jobId, sectionIndex },
+        ...(delay ? { delay } : {}),
         retries: 2,
     });
+}
+
+async function compressCodeWithRepomix(path: string, content: string): Promise<string> {
+    try {
+        const config = mergeConfigs(process.cwd(), {}, {
+            output: {
+                compress: true,
+                removeComments: true,
+                removeEmptyLines: true,
+            },
+        });
+        const processed = await processFiles(
+            [{ path, content }],
+            config,
+            () => {}
+        );
+        return processed[0]?.content || content;
+    } catch {
+        return content;
+    }
 }
 
 export async function executeNextStep(jobId: string, sectionIndex?: number) {
@@ -77,12 +99,14 @@ export async function executeNextStep(jobId: string, sectionIndex?: number) {
                 break;
             case 1:
                 await planStructure(job, data);
-                // Trigger first 5 sections in parallel (indices 0 to Math.min(5, N) - 1)
+                // Trigger initial parallel workers (driven by PIPELINE_CONCURRENCY, default 4) with staggered QStash delays
+                const concurrency = parseInt(process.env.PIPELINE_CONCURRENCY || "4", 10);
+                const stepDelaySec = parseInt(process.env.PIPELINE_STEP_DELAY_SEC || "2", 10);
                 const numSections = data.toc.length;
                 await redis.set(`job:${job.owner}/${job.repo}:completed_sections`, '0');
-                const initialWorkers = Math.min(5, numSections);
+                const initialWorkers = Math.min(concurrency, numSections);
                 for (let i = 0; i < initialWorkers; i++) {
-                    await triggerNextStep(job.id, i);
+                    await triggerNextStep(job.id, i, i * stepDelaySec);
                 }
                 break;
             case 2:
@@ -213,16 +237,29 @@ async function scanRepository(job: JobData, data: PipelineData) {
     await queue.updateJob(job.id, { currentStep: 1, data: JSON.stringify(data) });
 }
 
-async function planStructure(job: any, data: PipelineData) {
+async function planStructure(job: JobData, data: PipelineData) {
     console.log(`[Pipeline] Step 1: Planning TOC for ${job.owner}/${job.repo}`);
-    const filePaths = data.files.map((f: any) => f.path).join('\n');
+    
+    // Clean up any stale section keys from previous failed or re-indexed runs
+    const existingHash = (await redis.hgetall(job.id)) || {};
+    const oldSectionKeys = Object.keys(existingHash).filter((k) => k.startsWith('section:'));
+    if (oldSectionKeys.length > 0) {
+        await redis.hdel(job.id, ...oldSectionKeys);
+    }
+
+    const filePaths = data.files.map((f) => f.path).join('\n');
 
     const prompt = `You are GitDex, an expert technical writer and repository analyst.
 Analyze these file paths in the ${job.owner}/${job.repo} project:
 ${filePaths}
 
 First, profile the repository's architecture (determine if it is a monorepo, full-stack app, backend service, frontend client, library, CLI, etc.).
-Based on that profile, generate a hierarchical table of contents for its documentation with 5 to 12 top-level sections.
+
+Generate a structured, hierarchical Table of Contents for its documentation using numerical prefixes:
+- Main Parent Sections: Use single numbers "1", "2", "3", "4", etc. (e.g. "1" Overview, "2" Architecture, "3" API Reference)
+- Detailed Subsections: Use dotted numbers "1.1", "1.2", "2.1", "2.2", "3.1", etc. under their parent sections (e.g. "1.1" Introduction, "2.1" Backend Pipeline, "2.2" Database Schema)
+
+Ensure the documentation is organized with main parent sections ("1", "2", etc.) followed by 1 to 3 relevant subsections ("1.1", "1.2", etc.) under each parent section.
 
 When designing the structure, plan sections that would benefit from visual diagrams, such as:
 - Architecture overviews
@@ -230,10 +267,10 @@ When designing the structure, plan sections that would benefit from visual diagr
 - Component relationships
 - Process workflows and state transitions
 
-For each section in the documentation, provide:
-- prefix: Numeric prefix (e.g., "1", "2.1", etc.)
-- title: Section title (e.g., "Architecture Overview", "Database Schema", etc.)
-- filename: Mapped filename formatted as "prefix_title.mdx" (replace spaces with hyphens, lowercase)
+For each section/subsection in the documentation, provide:
+- prefix: Numeric prefix string (e.g., "1", "1.1", "2", "2.1", etc.)
+- title: Section title (e.g., "System Architecture", "Database Schema", etc.)
+- filename: Mapped filename formatted as "prefix_title.mdx" (replace spaces with hyphens, lowercase, e.g. "1_system-architecture.mdx" or "2.1_database-schema.mdx")
 - description: A brief summary of what this section covers
 - relevant_files: An array of 2 to 5 actual file paths from the provided list that are most relevant to this section
 
@@ -243,7 +280,7 @@ Output your final response as a valid JSON array of objects ONLY. Do not include
     const cleanedToc = tocText.replace(/```json\n?|\n?```/g, '').trim();
 
     data.toc = JSON.parse(cleanedToc);
-    data.toc.sort((a: any, b: any) => {
+    data.toc.sort((a: TocEntry, b: TocEntry) => {
         const pa = a.prefix.split('.').map(Number);
         const pb = b.prefix.split('.').map(Number);
         for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
@@ -255,7 +292,7 @@ Output your final response as a valid JSON array of objects ONLY. Do not include
     await queue.updateJob(job.id, { currentStep: 2, data: JSON.stringify(data) });
 }
 
-async function writeSingleSection(job: any, data: PipelineData, sectionIndex: number) {
+async function writeSingleSection(job: JobData, data: PipelineData, sectionIndex: number) {
     const entry = data.toc[sectionIndex];
     if (!entry) {
         throw new Error(`Section entry not found at index ${sectionIndex}`);
@@ -263,66 +300,56 @@ async function writeSingleSection(job: any, data: PipelineData, sectionIndex: nu
 
     console.log(`[Pipeline] Step 2: Writing section ${sectionIndex + 1}/${data.toc.length} for ${job.owner}/${job.repo}`);
 
-    const relevantContents = data.files.filter((f: any) => entry.relevant_files.includes(f.path));
+    const relevantContents = data.files.filter((f) => entry.relevant_files.includes(f.path));
 
-    const maxTokens = 100000;
-    let truncatedContents = [];
+    const maxTokensPerFile = 1500;
+    const processedContents = [];
     for (const f of relevantContents) {
-        const tokens = tiktoken.encode(f.content);
-        if (tokens.length > maxTokens / Math.max(relevantContents.length, 1)) {
-            const truncated = tiktoken.decode(tokens.slice(0, Math.floor(maxTokens / Math.max(relevantContents.length, 1))));
-            truncatedContents.push(`File: ${f.path}\n${truncated}... (truncated)\n---\n`);
+        const compressed = await compressCodeWithRepomix(f.path, f.content);
+        const tokens = tiktoken.encode(compressed);
+        if (tokens.length > maxTokensPerFile) {
+            const truncated = tiktoken.decode(tokens.slice(0, maxTokensPerFile));
+            processedContents.push(`File: ${f.path}\n${truncated}\n// ... [truncated to fit context]\n---\n`);
         } else {
-            truncatedContents.push(`File: ${f.path}\n${f.content}\n---\n`);
+            processedContents.push(`File: ${f.path}\n${compressed}\n---\n`);
         }
     }
-    const contentBlock = truncatedContents.join('');
+    const contentBlock = processedContents.join('');
 
-    const fullTocContext = JSON.stringify(data.toc, null, 2);
-
+    const compactTocContext = data.toc.map(t => `${t.prefix}. ${t.title}: ${t.description}`).join('\n');
     const prompt = `You are GitDex, an expert technical writer and software architect.
-Generate a comprehensive, accurate, and production-ready technical documentation page in Markdown/MDX format about a specific module within the project ${job.owner}/${job.repo}.
+Generate a comprehensive, engaging, and production-ready technical documentation page in Markdown/MDX format about the module "${entry.title}" in ${job.owner}/${job.repo}.
 
-The page you need to create:
-Section Title: "${entry.title}"
 Section Description: "${entry.description}"
 
 To help you understand the context and prevent repeating information, here is the full planned Table of Contents for this project's documentation:
 <global_toc>
-${fullTocContext}
+${compactTocContext}
 </global_toc>
 
 Use the following source files from the project as the sole basis for the content:
 <source_files>
 ${contentBlock}</source_files>
 
-CRITICAL RULES FOR GENERATION:
+WRITING & STRUCTURE GUIDELINES (DEEPWIKI NARRATIVE STYLE):
 
-1. STRUCTURE & LAYOUT:
-- Do not provide any conversational preamble, greeting, or introductory filler (e.g., do not say "Here is the documentation..."). Start directly with the content.
-- No frontmatter blocks.
-- Start directly with a H1 heading: "# ${entry.title}".
-- Break the page down into logical sections using H2 (##) and H3 (###) headings.
+1. OVERVIEW & ARCHITECTURAL ROLE:
+- Start directly with a H1 heading: "# ${entry.title}". Do NOT include conversational greetings, preamble, frontmatter blocks, or inline \`<TOC />\` / \`[TOC]\` tags.
+- Explain what this module does, why it exists, and how it fits into the overall architecture of ${job.owner}/${job.repo}.
+- Use clean Markdown tables or bullet lists to summarize core dependencies, key sub-components, or configuration schemas.
 
-2. FACTUAL GROUNDING:
-- Base all information strictly on the provided source files. Do not speculate, guess, or invent features not explicitly present in the code.
-- Cover at least 5 different source files from the available list across the document to ensure comprehensive code coverage (or cover all of them if fewer than 5 exist).
+2. COMPONENT INTERACTION & DATA FLOW:
+- Explain data flow, state management, or request processing in natural, engaging engineering prose.
+- Include 1 or 2 clear Mermaid diagrams (graph TD/LR or sequenceDiagram) illustrating component interactions or workflow transitions.
+- Quote all node labels (e.g., A["My Label"]) and keep label text under 4 words.
 
-3. MERMAID DIAGRAMS:
-- Include 1 or 2 visual Mermaid diagrams (e.g., flowchart TD, flowchart LR, sequenceDiagram, classDiagram, erDiagram) to represent component interactions or data flow.
-- Support both top-down ("graph TD") and left-to-right ("graph LR") layout directives.
-- Quote all node labels (e.g., A["My Label"]) to prevent syntax errors from special characters.
-- Keep node label text short (maximum 3-4 words).
-- For sequence diagrams:
-  - Start with "sequenceDiagram" on its own line.
-  - Define all participants using the "participant" keyword at the top.
-  - Use correct Mermaid arrow notations: ->> (calls/requests), -->> (responses/returns), -) (async messages).
-  - Use activation/deactivation markers (+/- suffix) and autonumber directive.
-  - Use loop/alt/opt/par/critical/break blocks for complex control flows.
+3. FOCUSED CODE WALKTHROUGH:
+- Include focused, 5 to 20 line code snippets for critical route handlers, type interfaces, or core algorithms.
+- Explain the "why" and "how" beneath each snippet. Do NOT copy-paste raw package.json dumps, lockfiles, or 100+ line verbatim file bodies.
 
-4. TABLES & CODE SNIPPETS:
-- Use Markdown tables to describe key API endpoints, data fields, or configuration options.
-- Keep code snippets brief, well-formatted, and directly extracted from the source files.
+4. ACCURACY & TONE:
+- Write in a natural, authoritative, and educational tone—like a senior developer onboarding a new engineer.
+- Base all statements strictly on the provided source code.
 
 5. OUTPUT:
 - Output ONLY the raw Markdown/MDX body. Do not wrap the entire response in outer markdown code fences (\`\`\`md or \`\`\`mdx).`;
@@ -330,6 +357,7 @@ CRITICAL RULES FOR GENERATION:
     let mdxContent = await generateWithRetry({ prompt });
 
     mdxContent = mdxContent
+        .replace(/<TOC\s*\/?>|\[TOC\]/gi, '')
         .replace(/^```(?:mdx|markdown|md)\n?/, '')
         .replace(/\n?```\s*$/, '')
         .trim();
@@ -346,9 +374,11 @@ CRITICAL RULES FOR GENERATION:
     const sectionField = `section:${sectionIndex}`;
     await redis.hset(job.id, { [sectionField]: JSON.stringify({ filename: entry.filename, content: finalContent }) });
 
-    const nextIndex = sectionIndex + 5;
+    const concurrency = parseInt(process.env.PIPELINE_CONCURRENCY || "4", 10);
+    const stepDelaySec = parseInt(process.env.PIPELINE_STEP_DELAY_SEC || "2", 10);
+    const nextIndex = sectionIndex + concurrency;
     if (nextIndex < data.toc.length) {
-        await triggerNextStep(job.id, nextIndex);
+        await triggerNextStep(job.id, nextIndex, stepDelaySec);
     }
 
     const jobHash = (await redis.hgetall(job.id)) || {};
@@ -382,7 +412,7 @@ CRITICAL RULES FOR GENERATION:
     }
 }
 
-async function commitToGithub(job: any, data: PipelineData) {
+async function commitToGithub(job: JobData, data: PipelineData) {
     console.log(`[Pipeline] Step 3: Committing to GitHub for ${job.owner}/${job.repo}`);
     const docsRepo = process.env.DOCS_REPO_NAME || 'gitdex-docs';
     const docsRepoOwner = process.env.DOCS_REPO_OWNER || process.env.GITHUB_USERNAME || "";
