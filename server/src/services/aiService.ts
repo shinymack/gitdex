@@ -6,11 +6,10 @@ const docsModels = (process.env.DOCS_MODELS || "gemma-4-31b-it,gemma-4-26b-a4b-i
   .map(m => m.trim())
   .filter(Boolean);
 
-// Module-level throttle driven by AI_THROTTLE_MS env var (defaults to 2000ms = 30 RPM max)
 let lastApiCallTimestamp = 0;
 const MIN_INTERVAL_MS = parseInt(process.env.AI_THROTTLE_MS || "2000", 10);
 
-interface GenerateOptions {
+export interface GenerateOptions {
   systemPrompt?: string;
   prompt: string;
   maxRetries?: number;
@@ -28,7 +27,6 @@ export async function generateWithRetry({
     
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
-        // Dynamic Throttle Logic - synchronous reservation
         const now = Date.now();
         const targetTime = Math.max(now, lastApiCallTimestamp + MIN_INTERVAL_MS);
         lastApiCallTimestamp = targetTime;
@@ -56,7 +54,6 @@ export async function generateWithRetry({
                             (typeof error === 'object' && error !== null && 'status' in error && error.status === 429);
 
         if (isRateLimit) {
-          // If we somehow still hit a 429, wait a full 10 seconds
           const { promise, resolve } = Promise.withResolvers<void>();
           setTimeout(resolve, 10000);
           await promise;
