@@ -23,9 +23,15 @@ export const verifyQstashSignature = async (
       return res.status(401).json({ error: 'Invalid Upstash-Signature header' });
     }
 
+    if (!process.env.BASE_URL) throw new Error('Callback base URL is not configured');
+    const base = new URL(process.env.BASE_URL);
+    if (base.username || base.password || base.search || base.hash || base.pathname !== '/') throw new Error('Invalid callback base URL');
+    const expectedUrl = `${base.origin}${req.originalUrl}`;
+
     const isValid = await qstashReceiver.verify({
       signature: headerSig,
       body,
+      url: expectedUrl,
     });
 
     if (!isValid) {
@@ -34,7 +40,7 @@ export const verifyQstashSignature = async (
 
     next();
   } catch (error) {
-    console.error('QStash verification failed:', error);
+    console.warn('QStash signature verification failed.');
     return res.status(401).json({ error: 'Signature verification failed' });
   }
 };

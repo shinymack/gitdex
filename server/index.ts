@@ -12,13 +12,12 @@ const PORT = process.env.PORT || 3001;
 
 app.use(requestLogger);
 
-const clientUrls = (process.env.CLIENT_URLS || 'http://localhost:3000')
-  .split(',')
-  .map(url => url.trim());
+const clientUrls = new Set((process.env.CLIENT_URLS || 'http://localhost:3000,https://gitdex-alpha.vercel.app')
+  .split(',').map(url => url.trim()).filter(Boolean));
 
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin || clientUrls.includes(origin) || origin.endsWith('.vercel.app')) {
+    if (!origin || clientUrls.has(origin)) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));
@@ -33,21 +32,23 @@ interface RequestWithRawBody extends Request {
 
 // CRITICAL: Capture the raw body BEFORE parsing JSON, so QStash signature verification works
 app.use(express.json({
+  limit: '512kb',
   verify: (req: RequestWithRawBody, _res, buf) => {
     req.rawBody = buf.toString();
   }
 }));
 
 app.use("/api", jobsRoutes);
-app.use("/api/dev", devRoutes);
+if (process.env.NODE_ENV !== 'production') app.use("/api/dev", devRoutes);
 
 app.get("/health", (_req: Request, res: Response) => {
   res.json({ status: "ok" });
 });
 
-app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
-  console.error("Global Error Handler:", err);
-  res.status(500).json({ error: "Internal Server Error" });
+app.use((err: Error & { status?: number }, _req: Request, res: Response, _next: NextFunction) => {
+  console.error("Request failed:", err.name);
+  const status = err.status && err.status >= 400 && err.status < 500 ? err.status : 500;
+  res.status(status).json({ error: status === 413 ? 'The request is too large.' : status === 400 ? 'The request body is invalid.' : 'The request could not be completed.' });
 });
 
 app.use((_req: Request, res: Response) => {

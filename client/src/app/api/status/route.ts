@@ -13,20 +13,21 @@ export async function GET(request: Request) {
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
     
     const backendRes = await fetch(
-      `${apiUrl}/api/status?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}`
+      `${apiUrl}/api/status?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}`,
+      { cache: 'no-store', signal: AbortSignal.any([request.signal, AbortSignal.timeout(18000)]) }
     );
 
     const text = await backendRes.text();
     let json;
     try {
       json = text ? JSON.parse(text) : {};
-    } catch (e) {
-      json = { indexed: false };
+    } catch {
+      return NextResponse.json({ error: 'Repository status is unavailable.' }, { status: 503 });
     }
 
     return NextResponse.json(json, { status: backendRes.status });
   } catch (error) {
     console.error('Error in status API route:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: 'Repository status is temporarily unavailable. Please try again.' }, { status: 503 });
   }
 }

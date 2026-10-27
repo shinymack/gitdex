@@ -2,9 +2,10 @@
 
 import { AssistantRuntimeProvider } from "@assistant-ui/react";
 import { useChatRuntime, AssistantChatTransport } from "@assistant-ui/react-ai-sdk";
-import { MessageCircle, Sparkles, X, RotateCcw } from "lucide-react";
+import { X, RotateCcw } from "lucide-react";
+import { BrandMark } from "@/components/brand";
 import { Thread } from "./thread";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 
 export const AssistantModal = ({ owner, repo }: { owner: string; repo: string }) => {
@@ -13,6 +14,26 @@ export const AssistantModal = ({ owner, repo }: { owner: string; repo: string })
   const [isMobile, setIsMobile] = useState(false);
   const [width, setWidth] = useState(480);
   const [isDragging, setIsDragging] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setOpen(false);
+        requestAnimationFrame(() => triggerRef.current?.focus());
+      } else if (event.key === 'Tab' && isMobile) {
+        const controls = panelRef.current?.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], textarea:not([disabled]), input:not([disabled]), [tabindex="0"]');
+        if (!controls?.length) return;
+        const first = controls[0]!;
+        const last = controls[controls.length - 1]!;
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+      }
+    };
+    window.addEventListener('keydown', close);
+    return () => window.removeEventListener('keydown', close);
+  }, [open, isMobile]);
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768);
@@ -81,7 +102,12 @@ export const AssistantModal = ({ owner, repo }: { owner: string; repo: string })
       )}
 
       {/* Sidebar panel */}
+      {open && (
       <div
+        ref={panelRef}
+        role="dialog"
+        aria-label={`GitDex assistant for ${owner}/${repo}`}
+        aria-modal={isMobile}
         className={cn(
           "fixed top-0 right-0 z-50 flex flex-col bg-popover border-l border-border shadow-2xl",
           // Mobile: full screen
@@ -112,7 +138,7 @@ export const AssistantModal = ({ owner, repo }: { owner: string; repo: string })
         {/* Header */}
         <div className="flex items-center justify-between border-b px-4 py-3 bg-muted/30 shrink-0">
           <span className="font-medium text-foreground flex items-center gap-2 text-sm">
-            <Sparkles className="h-3.5 w-3.5 text-primary" />
+            <BrandMark className="size-5" />
             GitDex Assistant
             <span className="text-muted-foreground font-normal text-xs">
               {owner}/{repo}
@@ -129,6 +155,7 @@ export const AssistantModal = ({ owner, repo }: { owner: string; repo: string })
             </button>
             <button
               onClick={() => setOpen(false)}
+              aria-label="Close assistant"
               className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-md hover:bg-muted"
             >
               <X className="h-4 w-4" />
@@ -141,10 +168,14 @@ export const AssistantModal = ({ owner, repo }: { owner: string; repo: string })
           <Thread owner={owner} repo={repo} />
         </div>
       </div>
+      )}
 
       {/* Trigger button - fixed bottom right, hidden when open on mobile */}
       {!(open && isMobile) && (
         <button
+          ref={triggerRef}
+          aria-expanded={open}
+          aria-label={open ? 'Close assistant' : 'Ask about this repository'}
           onClick={() => setOpen(!open)}
           className={cn(
             "fixed bottom-6 z-50 flex items-center gap-2 px-4 py-2.5 rounded-full bg-background border border-border shadow-lg text-sm font-medium text-foreground transition-all duration-200 hover:bg-muted hover:shadow-xl active:scale-95 group"
@@ -153,7 +184,7 @@ export const AssistantModal = ({ owner, repo }: { owner: string; repo: string })
             right: isMobile ? '24px' : (open ? `${width + 16}px` : '24px')
           }}
         >
-          <MessageCircle className="h-4 w-4 text-primary group-hover:scale-110 transition-transform duration-200" />
+          <BrandMark className="size-5" />
           <span>{open ? "Close" : "Ask AI"}</span>
         </button>
       )}

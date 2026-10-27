@@ -1,0 +1,17 @@
+.git
+.vercel
+**/node_modules
+**/.next
+**/.source
+**/dist
+**/out
+**/coverage
+**/.env
+**/.env.*
+!**/.env.example
+**/*.tsbuildinfo
+**/digest.txt
+**/*.log
+**/.cache
+**/.DS_Store
+docs

@@ -1,116 +1,38 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { RefreshCw, Check, AlertCircle, Loader2 } from 'lucide-react';
-import { toast } from "sonner";
+import { Loader2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { useDocsStore } from '@/lib/docs-store';
+import { isActiveJob, useRepositoryStatus } from '@/lib/use-repository-status';
 
-interface ReindexButtonProps {
-  owner: string;
-  repo: string;
-}
-
-function formatRelativeTime(timestamp: number): string {
-  const diff = Date.now() - timestamp;
-  if (diff < 0) return 'just now';
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
-
-export function ReindexButton({ owner, repo }: ReindexButtonProps) {
+export function ReindexButton({ owner, repo }: { owner: string; repo: string }) {
   const router = useRouter();
-  const [status, setStatus] = useState<'idle' | 'loading' | 'processing' | 'success' | 'error'>('idle');
-  const [lastIndexed, setLastIndexed] = useState<number | null>(null);
+  const { data, error, loading, starting, retry, start } = useRepositoryStatus(owner, repo);
+  const active = isActiveJob(data);
+  const failed = data?.job?.state === 'failed';
+  const statusUrl = `/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/status`;
+  const indexedAt = data?.lastIndexed ? new Date(data.lastIndexed) : null;
 
-  useEffect(() => {
-    async function fetchLastIndexed() {
-      try {
-        const res = await fetch(`/api/status?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.lastIndexed) {
-            setLastIndexed(data.lastIndexed);
-          }
-          if (data.job?.state === 'processing' || data.job?.state === 'queued') {
-            const msg = data.job.state === 'queued' ? 'Queued for reindex' : 'Reindexing in progress';
-            toast.info(msg, { description: `${owner}/${repo} is being updated in the background.` });
-          }
-        }
-      } catch (e) {
-        console.error('Failed to fetch last indexed time', e);
-      }
-    }
-    fetchLastIndexed();
-  }, [owner, repo]);
-
-  const handleReindex = async () => {
-    setStatus('loading');
-    try {
-      const res = await fetch('/api/index', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ repoUrl: `https://github.com/${owner}/${repo}`, force: false }),
-      });
-
-      const data = await res.json();
-
-      if (res.status === 429) {
-        setStatus('idle');
-        toast.error('Cooldown Active', {
-          description: data.error || "Please try again later."
-        });
-        return;
-      }
-
-      if (!res.ok) throw new Error(data.error || 'Failed to start reindexing');
-
-      if (!data.newlyStarted) {
-        setStatus('idle');
-        const msg = data.status === 'queued' ? 'Queued for reindex' : 'Reindexing in progress';
-        toast.info(msg, { description: `${owner}/${repo} is being updated in the background.` });
-        return;
-      }
-
-      toast.success('Reindexing Started', {
-        description: "The pipeline is running in the background."
-      });
-
-      router.push(`/${owner}/${repo}/status`);
-
-    } catch (e: any) {
-      setStatus('error');
-      toast.error('Failed to start', { description: e.message });
-      setTimeout(() => setStatus('idle'), 3000);
-    }
-  };
+  async function requestUpdate() {
+    if (await start(true)) router.push(statusUrl);
+  }
 
   return (
-    <div className="flex flex-col gap-1.5 w-full">
-      <Button
-        variant="outline"
-        size="sm"
-        className="w-full gap-2"
-        onClick={handleReindex}
-        disabled={status === 'loading'}
-      >
-        {status === 'loading' ? <Loader2 className="w-3 h-3 animate-spin" /> :
-          status === 'error' ? <AlertCircle className="w-3 h-3 text-destructive" /> :
-            <RefreshCw className="w-3 h-3" />}
-        {status === 'loading' ? 'Queuing...' : 'Reindex'}
-      </Button>
-      {lastIndexed && (
-        <span className="text-[10px] text-muted-foreground text-center">
-          Last indexed {formatRelativeTime(lastIndexed)}
-        </span>
+    <div className="flex w-full flex-col gap-2 text-xs">
+      {active ? (
+        <Link href={statusUrl} className="rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5 leading-5 text-foreground underline-offset-4 hover:underline">
+          {data?.job?.state === 'queued' ? 'Update queued.' : 'Update in progress.'} Keep reading, or view progress.
+        </Link>
+      ) : (
+        <Button variant="outline" size="sm" className="w-full gap-2" onClick={() => void requestUpdate()} disabled={loading || starting}>
+          {starting || loading ? <Loader2 aria-hidden="true" className="size-3.5 animate-spin motion-reduce:animate-none" /> : <RefreshCw aria-hidden="true" className="size-3.5" />}
+          {starting ? 'Requesting update…' : failed ? 'Retry guide update' : 'Update guide'}
+        </Button>
       )}
+      {failed && <p className="leading-5 text-muted-foreground">The latest update failed. This published guide is still readable. <Link href={statusUrl} className="text-primary underline underline-offset-4">View failure details</Link></p>}
+      {indexedAt && Number.isFinite(indexedAt.getTime()) && <p className="text-muted-foreground">Last published <time dateTime={indexedAt.toISOString()}>{indexedAt.toLocaleDateString('en', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' })}</time></p>}
+      {error && <div role="alert" className="space-y-1 leading-5 text-muted-foreground"><p>{error}</p><button type="button" onClick={retry} className="text-primary underline underline-offset-4">Check status again</button></div>}
     </div>
   );
 }

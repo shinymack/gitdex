@@ -155,34 +155,27 @@ function MermaidContent({
     cachePromise('mermaid', () => import('mermaid')),
   );
 
+  const dark = resolvedTheme !== 'light';
   mermaid.initialize({
     startOnLoad: false,
-    securityLevel: 'loose',
-    htmlLabels: true,
-    fontFamily: '"Plus Jakarta Sans", var(--font-mzh), sans-serif',
-    flowchart: {
-      padding: 24,
+    securityLevel: 'strict',
+    htmlLabels: false,
+    fontFamily: 'var(--font-mzt), sans-serif',
+    flowchart: { padding: 20, htmlLabels: false },
+    theme: 'base',
+    themeVariables: {
+      background: dark ? '#121c17' : '#f5f8f4',
+      primaryColor: dark ? '#293f30' : '#e1ede2',
+      primaryTextColor: dark ? '#edf2e9' : '#213b2e',
+      primaryBorderColor: dark ? '#98c1a3' : '#386e54',
+      lineColor: dark ? '#98c1a3' : '#386e54',
+      secondaryColor: dark ? '#203329' : '#edf3e9',
+      tertiaryColor: dark ? '#1a2920' : '#ffffff',
+      edgeLabelBackground: dark ? '#18291f' : '#f5f8f4',
+      textColor: dark ? '#edf2e9' : '#213b2e',
+      fontSize: '14px',
     },
-    themeCSS: `
-      @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
-      margin: 1.5rem auto 0;
-      .node rect, .node circle, .node ellipse, .node polygon, .node path {
-        stroke-width: 2.5px !important;
-      }
-      .label {
-        font-family: "Plus Jakarta Sans", sans-serif !important;
-        font-size: 14px !important;
-        font-weight: 600 !important;
-        text-align: center;
-      }
-      text.nodeLabel, text.labelText, .label, .edgeLabel span {
-        font-family: "Plus Jakarta Sans", sans-serif !important;
-        font-size: 14px !important;
-        font-weight: 600 !important;
-      }
-    `,
-    theme: resolvedTheme === 'dark' ? 'dark' : 'default',
-    look: 'handDrawn',
+    look: 'classic',
     suppressErrorRendering: true,
   });
 

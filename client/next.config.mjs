@@ -1,4 +1,7 @@
+import { fileURLToPath } from "node:url";
 import { createMDX } from "fumadocs-mdx/next";
+
+const workspaceRoot = fileURLToPath(new URL("..", import.meta.url));
 
 const withMDX = createMDX({
   // customise the config file path
@@ -11,6 +14,8 @@ const withMDX = createMDX({
 /** @type {import('next').NextConfig} */
 const config = {
   reactStrictMode: true,
+  outputFileTracingRoot: workspaceRoot,
+  turbopack: { root: workspaceRoot },
   images: {
     remotePatterns: [
       {

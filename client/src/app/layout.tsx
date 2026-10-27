@@ -7,11 +7,12 @@ import { MozillaHeadline, MozillaText } from './fonts';
 import { Toaster } from '@/components/ui/sonner';
 
 export const metadata: Metadata = {
-  title: 'GitDex - AI-Powered Documentation for GitHub Repositories',
-  description: 'Transform any GitHub repository into beautiful, interactive documentation in seconds',
+  title: { default: 'GitDex — A field guide to your code', template: '%s | GitDex' },
+  description: 'Explore public GitHub repositories through source-grounded documentation, architecture diagrams, and code-aware answers.',
+  applicationName: 'GitDex',
   icons: {
-    icon: '/favicon.ico',
-    apple: '/icon.png',
+    icon: [{ url: '/icon.svg', type: 'image/svg+xml' }, { url: '/favicon.ico' }],
+    apple: '/apple-icon.png',
   },
 };
 
@@ -25,14 +26,12 @@ export default function RootLayout({
       <body className={` ${MozillaHeadline.variable} ${MozillaText.variable}`}>
         <ThemeProvider
           attribute="class"
-          defaultTheme="system"
-          enableSystem
+          defaultTheme="dark"
+          enableSystem={false}
+          storageKey="gitdex-theme"
           disableTransitionOnChange
         >
-          <RootProvider
-            search={{
-              enabled: false 
-            }}>
+          <RootProvider theme={{ enabled: false }} search={{ enabled: false }}>
             {children}
             <Toaster />
           </RootProvider>

@@ -30,6 +30,8 @@ export const ToolFallback: ToolCallMessagePartComponent = ({
   const isRunning =
     (status?.type === "running" || status?.type === "requires-action") &&
     !isCancelled;
+  const failed = !isCancelled && (status?.type === 'incomplete' || (typeof result === 'object' && result !== null && 'error' in result));
+  const operation = toolName === 'readFiles' ? 'Source files' : toolName === 'listFiles' ? 'Repository paths' : toolName === 'searchCode' ? 'Source search' : toolName;
 
   return (
     <div
@@ -41,10 +43,10 @@ export const ToolFallback: ToolCallMessagePartComponent = ({
       <div className="aui-tool-fallback-header flex items-center gap-2 px-4">
         {isRunning ? (
           <Loader2Icon className="aui-tool-fallback-icon size-4 animate-spin text-primary" />
-        ) : isCancelled ? (
-          <XCircleIcon className="aui-tool-fallback-icon size-4 text-muted-foreground" />
+        ) : isCancelled || failed ? (
+          <XCircleIcon className={cn("aui-tool-fallback-icon size-4", failed ? 'text-destructive' : 'text-muted-foreground')} />
         ) : (
-          <CheckIcon className="aui-tool-fallback-icon size-4 text-green-500" />
+          <CheckIcon className="aui-tool-fallback-icon size-4 text-primary" />
         )}
         <p
           className={cn(
@@ -52,20 +54,10 @@ export const ToolFallback: ToolCallMessagePartComponent = ({
             isCancelled && "text-muted-foreground line-through",
           )}
         >
-          {isRunning ? (
-            <>
-              {toolName === "listFiles" ? "Listing files..." :
-                toolName === "readFile" ? "Reading file..." :
-                  `Running tool: ${toolName}`}
-            </>
-          ) : isCancelled ? (
-            <>Cancelled tool: <b>{toolName}</b></>
-          ) : (
-            <>Used tool: <b>{toolName}</b></>
-          )}
+          {isRunning ? `${operation}: reading…` : isCancelled ? `${operation}: cancelled` : failed ? `${operation}: unavailable` : `${operation}: complete`}
         </p>
         {!isRunning && (
-          <Button variant="ghost" size="icon" onClick={() => setIsCollapsed(!isCollapsed)}>
+          <Button variant="ghost" size="icon" aria-label={isCollapsed ? 'Show source operation details' : 'Hide source operation details'} aria-expanded={!isCollapsed} onClick={() => setIsCollapsed(!isCollapsed)}>
             {isCollapsed ? <ChevronUpIcon className="size-4" /> : <ChevronDownIcon className="size-4" />}
           </Button>
         )}

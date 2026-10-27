@@ -83,77 +83,13 @@ const ThreadScrollToBottom: FC = () => {
   );
 };
 
-const ThreadWelcome: FC<{ owner?: string; repo?: string }> = ({ owner, repo }) => {
-  const repoLabel = owner && repo ? `${owner}/${repo}` : 'this repository';
-  return (
-    <div className="aui-thread-welcome-root mx-auto my-auto flex w-full max-w-(--thread-max-width) flex-col justify-center gap-8 py-10 px-2 min-h-[65vh]">
-      <div className="aui-thread-welcome-message flex flex-col gap-2">
-        <h1 className="aui-thread-welcome-message-inner fade-in slide-in-from-bottom-1 animate-in font-semibold text-2xl tracking-tight duration-200">
-          Ask me anything about
-        </h1>
-        <p className="aui-thread-welcome-message-inner fade-in slide-in-from-bottom-1 animate-in text-primary font-mono text-lg font-semibold tracking-wide delay-75 duration-200">
-          {repoLabel}
-        </p>
-        <p className="aui-thread-welcome-message-inner fade-in slide-in-from-bottom-1 animate-in text-muted-foreground text-sm mt-1 delay-100 duration-200">
-          I can read files and explore the codebase to answer your questions.
-        </p>
-      </div>
-      <div className="flex flex-col gap-3">
-        <span className="text-xs font-semibold text-muted-foreground/60 uppercase tracking-wider px-1">
-          Suggested Prompts
-        </span>
-        <ThreadSuggestions />
-      </div>
-    </div>
-  );
-};
-
-const SUGGESTIONS: { title: string; label: string; prompt: string }[] = [
-  {
-    title: "Explain the architecture",
-    label: "overview of structure & components",
-    prompt: "Give me an overview of this repository's architecture and main components.",
-  },
-  {
-    title: "Show me the API routes",
-    label: "list all endpoints",
-    prompt: "What are all the API routes or endpoints defined in this codebase and what do they do?",
-  },
-  {
-    title: "How does auth work?",
-    label: "find authentication code",
-    prompt: "How does authentication and authorization work in this codebase?",
-  },
-];
-
-const ThreadSuggestions: FC = () => {
-  return (
-    <div className="aui-thread-welcome-suggestions flex flex-col gap-2 pb-4 w-full">
-      {SUGGESTIONS.map((suggestion, index) => (
-        <div
-          key={suggestion.prompt}
-          className="aui-thread-welcome-suggestion-display w-full fade-in slide-in-from-bottom-2 animate-in fill-mode-both duration-200"
-          style={{ animationDelay: `${100 + index * 50}ms` }}
-        >
-          <ThreadPrimitive.Suggestion prompt={suggestion.prompt} send asChild>
-            <Button
-              variant="outline"
-              className="aui-thread-welcome-suggestion h-auto w-full flex flex-col items-start justify-center gap-1 rounded-xl px-4 py-3 text-left transition-colors hover:bg-muted/50 border border-border/80 bg-card/40"
-              aria-label={suggestion.prompt}
-            >
-              <span className="aui-thread-welcome-suggestion-text-1 font-semibold text-sm text-foreground">
-                {suggestion.title}
-              </span>
-              <span className="aui-thread-welcome-suggestion-text-2 text-muted-foreground text-xs leading-normal line-clamp-1">
-                {suggestion.label}
-              </span>
-            </Button>
-          </ThreadPrimitive.Suggestion>
-        </div>
-      ))}
-    </div>
-  );
-};
+const ThreadWelcome: FC<{ owner?: string; repo?: string }> = ({ owner, repo }) => (
+  <div className="mx-auto flex w-full max-w-(--thread-max-width) flex-1 flex-col justify-center gap-4 px-2 py-12">
+    <h2 className="text-3xl font-semibold leading-tight tracking-[-0.04em]">Go deeper into the code.</h2>
+    <p className="break-words text-sm font-medium text-primary">{owner && repo ? `${owner}/${repo}` : 'Repository assistant'}</p>
+    <p className="max-w-sm text-sm leading-relaxed text-muted-foreground">Ask about the implementation. Answers can inspect source files and link back to the code.</p>
+  </div>
+);
 
 const Composer: FC = () => {
   const messages = useThread((t: any) => t.messages);
@@ -164,10 +100,10 @@ const Composer: FC = () => {
     return (
       <div className="flex flex-col items-center justify-center gap-1.5 p-4 rounded-xl border border-amber-500/20 bg-amber-500/5 text-center">
         <span className="text-xs font-semibold text-amber-500/90">
-          Message Limit Reached
+          Conversation limit reached
         </span>
         <p className="text-xs text-muted-foreground">
-          This thread has reached the 10-message limit. Use the reset icon at the top right to start a new chat.
+          This conversation has reached its 10-message limit. Use Clear chat to start another conversation.
         </p>
       </div>
     );
@@ -178,7 +114,7 @@ const Composer: FC = () => {
       <ComposerPrimitive.AttachmentDropzone className="aui-composer-attachment-dropzone flex w-full flex-col rounded-2xl border border-input bg-background px-1 pt-2 outline-none transition-shadow has-[textarea:focus-visible]:border-ring has-[textarea:focus-visible]:ring-2 has-[textarea:focus-visible]:ring-ring/20 data-[dragging=true]:border-ring data-[dragging=true]:border-dashed data-[dragging=true]:bg-accent/50">
         <ComposerAttachments />
         <ComposerPrimitive.Input
-          placeholder="Send a message..."
+          placeholder="Ask about this repository"
           className="aui-composer-input mb-1 max-h-32 min-h-14 w-full resize-none bg-transparent px-4 pt-2 pb-3 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-0"
           rows={1}
           autoFocus
@@ -241,7 +177,7 @@ const ComposerAction: FC = () => {
 const MessageError: FC = () => {
   return (
     <MessagePrimitive.Error>
-      <ErrorPrimitive.Root className="aui-message-error-root mt-2 rounded-md border border-destructive bg-destructive/10 p-3 text-destructive text-sm dark:bg-destructive/5 dark:text-red-200">
+      <ErrorPrimitive.Root className="aui-message-error-root mt-2 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
         <ErrorPrimitive.Message className="aui-message-error-message line-clamp-2" />
       </ErrorPrimitive.Root>
     </MessagePrimitive.Error>
@@ -256,8 +192,9 @@ const AssistantMessage: FC = () => {
     >
       <div className="aui-assistant-message-content wrap-break-word px-2 text-foreground leading-relaxed">
         <AssistantIf condition={({ message }) => message.status?.type === "running" && message.content.length === 0}>
-          <div className="flex items-center py-2 px-1">
-            <span className="w-2.5 h-2.5 rounded-full bg-primary animate-pulse shadow-lg shadow-primary/50" />
+          <div role="status" className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
+            <span className="size-2 rounded-full bg-primary motion-safe:animate-pulse" />
+            Reading the repository…
           </div>
         </AssistantIf>
 

@@ -54,31 +54,19 @@ const remarkFixCodeLang = () => {
   };
 };
 
-/**
- * Escapes bare curly braces in text and inlineCode nodes so the MDX JSX
- * parser doesn't treat model-generated content like `^{th}` as JS expressions.
- *
- * Must run AFTER remarkMath so that $...$ blocks are already converted to
- * math nodes (not text nodes) and their internal braces are never touched.
- *
- * Code block nodes are excluded - their content is verbatim and escaping
- * would cause literal backslashes to appear in rendered code.
- */
-const remarkEscapeBraces = () => {
-  return (tree: unknown) => {
-    visit(tree as never, ['text', 'inlineCode'], (node: { value?: unknown }) => {
-      if (typeof node.value === 'string') {
-        node.value = node.value.replace(/([{}])/g, '\\$1');
-      }
-    });
-  };
+// Generated content is Markdown, never executable MDX or raw HTML.
+const remarkLiteralHtml = () => (tree: unknown) => {
+  visit(tree as never, 'html', (node: { type: string; value: string }) => {
+    node.type = 'text';
+  });
 };
 
 export const compiler = createCompiler({
+  format: 'md',
   remarkPlugins: [
     remarkFixCodeLang,
-    remarkMath,         // must come before remarkEscapeBraces
-    remarkEscapeBraces, // safe: math nodes already extracted
+    remarkMath,
+    remarkLiteralHtml,
     remarkMdxMermaid,
   ],
   rehypePlugins: [

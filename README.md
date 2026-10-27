@@ -1,48 +1,50 @@
 # GitDex
 
-Transform any GitHub repository into beautiful, AI-powered interactive documentation in seconds.
+Turn a public GitHub repository into a source-linked guide, then ask questions against its actual code.
 
-GitDex analyzes your codebase structure, plans a table of contents, writes comprehensive markdown docs using LLMs, and presents it in a search-ready web reader with an interactive AI chat assistant.
+Production: https://gitdex-alpha.vercel.app
 
----
+## What it does
 
-## Key Features
+- Scans one immutable source commit, plans a guide, generates sections, and publishes the complete guide together.
+- Renders non-executable Markdown with code highlighting, tables, mathematics, and validated Mermaid diagrams.
+- Searches within the current repository’s published guide.
+- Answers repository questions with bounded source-reading tools and links to the pinned commit.
+- Keeps the previous guide readable while a refresh is queued, running, or failed.
+- Uses the same green identity across the landing page, reader, status screens, assistant, and app icons. Dark is the first-visit default; the footer theme control remembers a light/dark choice.
 
-* **Multi-Step Indexing**: High-performance pipeline that scans, plans, and writes documentation.
-* **AI Code Assistant**: Chat interface using manual ReAct loops to answer questions about the repository.
-* **Interactive Diagrams**: Automatic Mermaid diagram generation for visualizing codebase architecture.
-* **Serverless Queueing**: Custom-built queue system using Upstash Redis and QStash to bypass serverless execution timeouts.
+## Architecture
 
----
+`client/` is the Next.js/Fumadocs reader and assistant interface. `server/` is the Express API, source reader, generator, and durable Redis/QStash pipeline.
 
-## How It Works
+```mermaid
+flowchart LR
+  Browser --> Client[Next.js reader]
+  Client --> API[Express API]
+  API --> Redis[Redis runs and outbox]
+  Redis --> Broker[QStash deliveries]
+  Broker --> Worker[Signed pipeline steps]
+  Worker --> Source[Public GitHub commit]
+  Worker --> Models[Configured Google models]
+  Worker --> Store[GitHub documentation repository]
+  Store --> Client
+```
 
-To support serverless timeout limits, the indexing workflow is decoupled into step-by-step executions orchestrated by QStash:
+Indexing phases are scan, plan, sections, and publish. Immutable run IDs and token-owned leases reject stale worker completions. Redis Lua atomically admits work, records the next delivery, and promotes the next repository. A signed recurring reconciler retries durable delivery intents; QStash delivers steps at least once.
 
-<div align="center" style="margin: 24px 0;">
-  <a href="https://gitdex-alpha.vercel.app/shinymack/gitdex" target="_blank" style="text-decoration: none;">
-    <span style="display: inline-block; padding: 10px 24px; font-size: 14px; font-weight: 600; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; color: #ffffff; background-color: #10b981; border-radius: 6px; border: 1px solid #059669; text-decoration: none;">
-      Explore Deployed Docs &rarr;
-    </span>
-  </a>
-</div>
+Publication uses one Git tree/commit and a non-force branch update. Invalid output does not replace the last published guide. Redis ownership and a GitHub ref update are not a cross-service transaction; an already-sent GitHub write cannot be revoked by losing a lease.
 
----
+## Reading limits
 
-## Repository Architecture
+Indexing selects up to 50 eligible files and plans up to 20 sections by default. A guide’s manifest records its source commit, selected files, coverage, generator version, and section dependencies. The reader discloses available provenance; an older guide without a manifest is not presented as fully audited source coverage.
 
-This repository is split into two main packages:
+The assistant reads public source independently of the generated guide. It has bounded file/search budgets and a request deadline. Its answers are generated, not a substitute for reviewing the cited source. Private repositories are not supported, and the documentation writer token is never used to read source repositories.
 
-* **[Client](./client/README.md)**: A Next.js application that renders documentation via Fumadocs and provides the AI assistant interface.
-* **[Server](./server/README.md)**: An Express API that manages the Upstash Redis queue and handles the Gemini indexing pipeline.
+## Development and deployment
 
-For setup instructions and configuration steps, see the links above.
+- [Client setup and reader behavior](client/README.md)
+- [API, queue, configuration, and deployment](server/README.md)
 
----
+Install each package with Bun. Verify both packages with `bun x tsc --noEmit`; build the client with `bun run build`. Development servers belong in separate windows of the `omp` tmux session.
 
-## Technical Stack
-
-* **Frontend**: Next.js, Tailwind CSS, Fumadocs, assistant-ui
-* **Backend**: Node.js, Express, Upstash Redis, Upstash QStash
-* **AI Model**: Google Gemini (via Google AI SDK)
-* **GitHub Integration**: Octokit (GitHub REST API)
+CLI deployments can include uncommitted local changes. Indexing still reads the source commit published on GitHub, not the local working tree. Do not delete published guides or shared Redis keys to force a fresh run.

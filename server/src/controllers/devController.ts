@@ -1,156 +1,61 @@
+import { timingSafeEqual } from 'node:crypto';
 import type { Request, Response } from 'express';
 import { redis } from '../config/redis.js';
 import { octokit } from '../config/octokit.js';
+import queue, { NS, runKey } from '../services/queueService.js';
+import { docsDestination } from '../services/githubService.js';
+import { parseRepositoryUrl } from '../services/repositoryAccess.js';
 
-export const clearRedis = async (req: Request, res: Response) => {
-  if (process.env.NODE_ENV === 'production') {
-    return res.status(403).json({ error: "Not allowed in production" });
-  }
-
-  const { owner, repo, all } = req.query as { owner?: string; repo?: string; all?: string };
-
-  if (all === 'true') {
-    try {
-      const jobKeys = await redis.keys('job:*');
-      const lockKeys = await redis.keys('lock:*');
-      const systemKeys = await redis.keys('system:*');
-      const lastIndexedKeys = await redis.keys('last_indexed:*');
-
-      const allKeys = Array.from(new Set([...jobKeys, ...lockKeys, ...systemKeys, ...lastIndexedKeys]));
-
-      if (allKeys.length > 0) {
-        await redis.del(...allKeys);
-      }
-
-      return res.json({ success: true, message: `Cleared ALL ${allKeys.length} keys from Redis.` });
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error('Error clearing all Redis keys:', message);
-      return res.status(500).json({ error: 'Failed to clear Redis' });
-    }
-  }
-
-  if (!owner || !repo) {
-    return res.status(400).json({
-      error: "Missing owner or repo query params. Usage: /api/dev/clear?owner=OWNER&repo=REPO (or ?all=true to clear everything)"
-    });
-  }
-
+function authorized(req:Request):boolean {
+  const secret=process.env.DEV_ADMIN_TOKEN;
+  const supplied=req.get('x-dev-admin-token');
+  if (process.env.NODE_ENV!=='development' || !secret || !supplied) return false;
+  const a=Buffer.from(secret),b=Buffer.from(supplied);
+  return a.length===b.length && timingSafeEqual(a,b);
+}
+function identity(req:Request) {
+  const {owner,repo}=req.query;
+  if (typeof owner!=='string' || typeof repo!=='string') return null;
+  return parseRepositoryUrl(`https://github.com/${owner}/${repo}`);
+}
+export const clearRedis=async(req:Request,res:Response)=>{
+  if (!authorized(req)) return res.status(403).json({error:'Development administration is disabled or unauthorized.'});
+  const parsed=identity(req);
+  if (!parsed || req.query.all!==undefined) return res.status(400).json({error:'Provide one owner/repo. Global key deletion is not supported.'});
+  const owner=parsed.owner.toLowerCase(),repo=parsed.repo.toLowerCase();
   try {
-    const targetJobId = `job:${owner}/${repo}`;
-    
-    const jobKeys = await redis.keys(`job:${owner}/${repo}*`);
-    const lockKeys = await redis.keys(`lock:*:${owner}/${repo}*`);
-    const directLockKeys = await redis.keys(`lock:${owner}/${repo}*`);
-    const lastIndexedKey = `last_indexed:${owner}/${repo}`;
-
-    const keysToDelete = Array.from(new Set([
-      ...jobKeys,
-      ...lockKeys,
-      ...directLockKeys,
-      lastIndexedKey
-    ]));
-
-    if (keysToDelete.length > 0) {
-      await redis.del(...keysToDelete);
-    }
-
-    const activeJobId = await redis.get<string>('system:active_job');
-    if (activeJobId === targetJobId) {
-      await redis.del('system:active_job');
-    }
-
-    await redis.lrem('system:queue', 0, targetJobId);
-
-    return res.json({
-      success: true,
-      message: `Cleared ${keysToDelete.length} Redis keys and queue entries for ${owner}/${repo}.`
-    });
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(`Error clearing Redis for ${owner}/${repo}:`, message);
-    return res.status(500).json({ error: `Failed to clear Redis for ${owner}/${repo}` });
-  }
+    const job=await queue.getJobByRepo(owner,repo);
+    if (!job) return res.json({success:true,removed:0});
+    const removed=await redis.eval<unknown[], number>(`
+if redis.call('GET',KEYS[1]) ~= ARGV[1] then return 0 end
+local state=redis.call('HGET',KEYS[2],'state')
+if state == 'queued' or state == 'processing' then return -1 end
+redis.call('DEL',KEYS[1],KEYS[2]); return 1`,[`${NS}latest:${owner}/${repo}`,runKey(job.runId)],[job.runId]);
+    if (removed<0) return res.status(409).json({error:'Active runs must finish or be reconciled, not deleted.'});
+    return res.json({success:true,removed});
+  } catch { return res.status(503).json({error:'Development cleanup failed.'}); }
 };
-
-export const deleteDocs = async (req: Request, res: Response) => {
-  if (process.env.NODE_ENV === 'production') {
-    return res.status(403).json({ error: "Not allowed in production" });
-  }
-
-  const { owner, repo } = req.query as { owner?: string; repo?: string };
-  if (!owner || !repo) {
-    return res.status(400).json({ error: "Missing owner or repo query params" });
-  }
-
+export const deleteDocs=async(req:Request,res:Response)=>{
+  if (!authorized(req) || process.env.DOCS_ALLOW_DESTRUCTIVE_DEV!=='true') return res.status(403).json({error:'Destructive development administration is disabled or unauthorized.'});
+  const parsed=identity(req);
+  if (!parsed) return res.status(400).json({error:'Provide a valid owner/repo.'});
+  const owner=parsed.owner.toLowerCase(),repo=parsed.repo.toLowerCase();
   try {
-    const docsRepoOwner = process.env.DOCS_REPO_OWNER || process.env.GITHUB_USERNAME!;
-    const docsRepo = process.env.DOCS_REPO_NAME || 'gitdex-docs';
-    const docsPath = `docs/${owner}/${repo}`;
-
-    const { data: treeData } = await octokit.rest.git.getTree({
-      owner: docsRepoOwner,
-      repo: docsRepo,
-      tree_sha: 'main',
-      recursive: 'true',
-    });
-
-    const filesToDelete = treeData.tree.filter(
-      (item) => item.path?.startsWith(`${docsPath}/`) && item.type === 'blob'
-    );
-
-    if (filesToDelete.length === 0) {
-      return res.status(404).json({ error: `No docs found for ${owner}/${repo}` });
-    }
-
-    const { data: refData } = await octokit.rest.git.getRef({
-      owner: docsRepoOwner,
-      repo: docsRepo,
-      ref: 'heads/main',
-    });
-    const { data: commitData } = await octokit.rest.git.getCommit({
-      owner: docsRepoOwner,
-      repo: docsRepo,
-      commit_sha: refData.object.sha,
-    });
-    const { data: newTree } = await octokit.rest.git.createTree({
-      owner: docsRepoOwner,
-      repo: docsRepo,
-      base_tree: commitData.tree.sha,
-      tree: filesToDelete.map((f) => ({
-        path: f.path!,
-        mode: '100644' as const,
-        type: 'blob' as const,
-        sha: null,
-      })),
-    });
-    const { data: newCommit } = await octokit.rest.git.createCommit({
-      owner: docsRepoOwner,
-      repo: docsRepo,
-      message: `GitDex Dev: delete docs for ${owner}/${repo}`,
-      tree: newTree.sha,
-      parents: [refData.object.sha],
-    });
-    await octokit.rest.git.updateRef({
-      owner: docsRepoOwner,
-      repo: docsRepo,
-      ref: 'heads/main',
-      sha: newCommit.sha,
-    });
-
-    const jobKey = `job:${owner}/${repo}`;
-    const lockKey = `lock:${owner}/${repo}`;
-    const stepLockKey = `lock:step:${jobKey}`;
-    const lastIndexedKey = `last_indexed:${owner}/${repo}`;
-    await redis.del(jobKey, lockKey, stepLockKey, lastIndexedKey);
-
-    return res.json({
-      success: true,
-      message: `Deleted ${filesToDelete.length} files for ${owner}/${repo} and cleared Redis keys.`,
-    });
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error('Error deleting docs:', message);
-    return res.status(500).json({ error: message });
-  }
+    const job=await queue.getJobByRepo(owner,repo);
+    if (job && ['queued','processing'].includes(job.state)) return res.status(409).json({error:'An active run cannot be cleared.'});
+    const target=docsDestination();
+    const signal=AbortSignal.timeout(20000);
+    const {data:ref}=await octokit.rest.git.getRef({owner:target.owner,repo:target.repo,ref:`heads/${target.branch}`,request:{signal}});
+    const {data:base}=await octokit.rest.git.getCommit({owner:target.owner,repo:target.repo,commit_sha:ref.object.sha,request:{signal}});
+    const {data:tree}=await octokit.rest.git.getTree({owner:target.owner,repo:target.repo,tree_sha:base.tree.sha,recursive:'true',request:{signal}});
+    if (tree.truncated) throw new Error('Incomplete tree');
+    const prefix=`docs/${owner}/${repo}/`;
+    const deletions=tree.tree.filter(item=>item.type==='blob' && item.path?.startsWith(prefix)).map(item=>({path:item.path!,mode:'100644' as const,type:'blob' as const,sha:null}));
+    if (!deletions.length) return res.status(404).json({error:'No published guide found.'});
+    const {data:newTree}=await octokit.rest.git.createTree({owner:target.owner,repo:target.repo,base_tree:base.tree.sha,tree:deletions,request:{signal}});
+    const {data:commit}=await octokit.rest.git.createCommit({owner:target.owner,repo:target.repo,message:`GitDex development: remove ${owner}/${repo}`,tree:newTree.sha,parents:[ref.object.sha],request:{signal}});
+    await octokit.rest.git.updateRef({owner:target.owner,repo:target.repo,ref:`heads/${target.branch}`,sha:commit.sha,force:false,request:{signal}});
+    await redis.del(`${NS}published:${owner}/${repo}`);
+    return res.json({success:true,deleted:deletions.length});
+  } catch { return res.status(503).json({error:'Documentation deletion failed; no force update was attempted.'}); }
 };

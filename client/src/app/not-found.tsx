@@ -1,41 +1,22 @@
 import Link from 'next/link';
-import { ArrowLeft, BookOpen } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
+import { Brand, BrandMark } from '@/components/brand';
+import { ThemeToggle } from '@/components/theme-toggle';
 
 export default function NotFound() {
   return (
-    <main className="flex flex-col items-center justify-center min-h-[100dvh] px-6 text-center bg-background text-foreground">
-      {/* Design Read: Custom 404 page for developers, minimalist dark-tech, using project variables */}
-      
-      <div className="max-w-md w-full space-y-6">
-        <p className="font-mono text-sm tracking-[0.2em] text-muted-foreground uppercase">
-          404 Error
-        </p>
-
-        <h1 className="font-display text-4xl md:text-5xl font-bold tracking-tight leading-none">
-          Lost in the Code
-        </h1>
-
-        <p className="text-base text-muted-foreground leading-relaxed max-w-[45ch] mx-auto">
-          The repository documentation page or directory path you requested does not exist or has been updated.
-        </p>
-
-        <div className="flex flex-col sm:flex-row gap-3 justify-center pt-4">
-          <Link
-            href="/"
-            className="inline-flex items-center justify-center px-5 py-2.5 rounded-md text-sm font-semibold bg-foreground text-background hover:bg-foreground/90 transition-all active:scale-[0.98] gap-2"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            Return Home
-          </Link>
-          <Link
-            href="/shinymack/gitdex"
-            className="inline-flex items-center justify-center px-5 py-2.5 rounded-md text-sm font-semibold border border-border text-foreground hover:bg-accent transition-all active:scale-[0.98] gap-2"
-          >
-            <BookOpen className="w-4 h-4" />
-            Browse Example
-          </Link>
+    <div className="flex min-h-dvh flex-col bg-background text-foreground">
+      <header className="mx-auto flex w-full max-w-7xl items-center px-6 py-7"><Brand /></header>
+      <main className="mx-auto flex w-full max-w-7xl flex-1 items-center px-6 py-16">
+        <div className="max-w-xl">
+          <BrandMark className="mb-8 size-12" />
+          <p className="mb-4 text-sm text-muted-foreground">Page not found</p>
+          <h1 className="text-4xl font-semibold leading-tight tracking-[-0.045em] sm:text-6xl">This path ends here.</h1>
+          <p className="mt-6 max-w-md text-base leading-relaxed text-muted-foreground">This documentation page does not exist, or its address changed when the guide was updated. Open the repository again to find its current pages.</p>
+          <Link href="/" className="mt-8 inline-flex min-h-11 items-center gap-2 rounded-lg bg-primary px-5 py-3 text-sm font-medium text-primary-foreground"><ArrowLeft aria-hidden="true" className="size-4" />Find a repository</Link>
         </div>
-      </div>
-    </main>
+      </main>
+      <footer className="mx-auto flex w-full max-w-7xl items-center justify-between gap-5 border-t border-border px-6 py-6"><p className="text-xs text-muted-foreground">GitDex. A field guide to your code.</p><ThemeToggle /></footer>
+    </div>
   );
 }

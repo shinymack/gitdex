@@ -1,146 +1,64 @@
-import type { Request, Response } from "express";
-import queue from "../services/queueService.js";
-import { redis } from "../config/redis.js";
-import { octokit } from "../config/octokit.js";
-import { qstash } from "../config/qstash.js";
-import { parseOwnerRepo, verifyRepoExists } from "../services/githubService.js";
-import { triggerNextStep } from "../services/qstashService.js";
+import type { Request, Response } from 'express';
+import queue, { validDelivery } from '../services/queueService.js';
+import { parseOwnerRepo, verifyRepoExists, getPublishedGuide } from '../services/githubService.js';
+import { dispatchPending, handleFailureCallback } from '../services/qstashService.js';
+import { executeNextStep, DeliveryBusyError } from '../services/pipelineService.js';
+import type { JobData } from '../types/job.js';
 
-export const createJob = async (req: Request, res: Response) => {
+function safeJob(job:JobData) {
+  return {id:job.id,runId:job.runId,state:job.state,owner:job.owner,repo:job.repo,createdAt:job.createdAt,updatedAt:job.updatedAt,error:job.error,phase:job.phase,currentStep:job.currentStep,sectionCount:job.sectionCount,sectionsCompleted:job.sectionsCompleted};
+}
+export const createJob=async(req:Request,res:Response)=>{
+  if (process.env.INDEXING_PAUSED==='true') return res.status(503).json({error:'New indexing is temporarily paused. Existing guides remain available.'});
   try {
-    const { repoUrl, force } = req.body as { repoUrl?: string; force?: boolean };
-    if (!repoUrl) return res.status(400).json({ error: "Repo URL required" });
-
-    const parsed = parseOwnerRepo(repoUrl);
-    if (!parsed) return res.status(400).json({ error: "Invalid Repo URL" });
-
-    const { owner, repo } = parsed;
-    const verification = await verifyRepoExists(owner, repo);
-    if (!verification.exists) {
-      return res.status(404).json({ error: verification.error ? `GitHub verification failed: ${verification.error}` : "Repository not found on GitHub." });
-    }
-
-    const { jobId, state, newlyStarted } = await queue.addJob(repoUrl, force === true);
-    
-    if (state === 'processing' && newlyStarted) {
-      try {
-        await triggerNextStep(jobId);
-      } catch (qstashError: unknown) {
-        const message = qstashError instanceof Error ? qstashError.message : String(qstashError);
-        console.error(`[Queue] Failed to publish initial QStash step. Failing job: ${message}`);
-        await queue.failJob(jobId, `QStash publish failed: ${message}`);
-        throw qstashError;
-      }
-    }
-
-    return res.json({ jobId, status: state, newlyStarted });
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (message.includes('cooldown')) {
-      return res.status(429).json({ error: message });
-    }
-    return res.status(500).json({ error: "Failed to create job" });
+    const {repoUrl,force}=req.body || {};
+    if (typeof repoUrl!=='string') return res.status(400).json({error:'A public GitHub repository URL is required.'});
+    if (force !== undefined && typeof force !== 'boolean') return res.status(400).json({error:'force must be a boolean.'});
+    const parsed=parseOwnerRepo(repoUrl);
+    if (!parsed) return res.status(400).json({error:'Invalid GitHub repository URL.'});
+    const verification=await verifyRepoExists(parsed.owner,parsed.repo);
+    if (!verification.exists) return res.status(verification.error?503:404).json({error:verification.error || 'This public repository is unavailable.'});
+    const result=await queue.addJob(repoUrl,force===true);
+    await dispatchPending();
+    return res.status(202).json({jobId:result.jobId,status:result.state,newlyStarted:result.newlyStarted});
+  } catch(error) {
+    if (error instanceof Error && error.message.includes('cooldown')) return res.status(429).json({error:error.message});
+    return res.status(503).json({error:'Indexing admission is temporarily unavailable. Please retry.'});
   }
 };
-
-export const getJobStatus = async (req: Request, res: Response) => {
+export const getJobStatus=async(req:Request,res:Response)=>{
   try {
-    const { jobId } = req.params as { jobId: string };
-    const job = await queue.getJob(jobId);
-    if (!job) return res.status(404).json({ error: "Job not found" });
-
-    const { data: _data, ...safeJob } = job;
-    return res.json(safeJob);
-  } catch (error: unknown) {
-    console.error('getJobStatus error', error);
-    return res.status(500).json({ error: "Failed to get job status" });
+    const job=await queue.getJob(String(req.params.jobId));
+    return job?res.json(safeJob(job)):res.status(404).json({error:'Job not found.'});
+  } catch { return res.status(503).json({error:'Job status is temporarily unavailable.'}); }
+};
+export const getStatusByName=async(req:Request,res:Response)=>{
+  const {owner,repo}=req.query;
+  if (typeof owner!=='string' || typeof repo!=='string' || !/^[A-Za-z0-9_.-]+$/.test(owner) || !/^[A-Za-z0-9_.-]+$/.test(repo) || [owner,repo].some(value=>value==='.' || value==='..') || !parseOwnerRepo(`https://github.com/${owner}/${repo}`)) return res.status(400).json({error:'Valid owner and repo parameters are required.'});
+  try {
+    const verification=await verifyRepoExists(owner,repo);
+    if (!verification.exists) return res.status(verification.error?503:404).json({error:verification.error || 'This public repository is unavailable.'});
+    const [job,guide]=await Promise.all([queue.getJobByRepo(owner,repo),getPublishedGuide(owner,repo,AbortSignal.timeout(15000),false)]);
+    return res.json({indexed:!!guide,lastIndexed:guide?.lastIndexed ?? null,job:job?safeJob(job):null,...(guide?{path:`/${owner}/${repo}`,sourceSha:guide.manifest?.sourceSha,docsCommitSha:guide.commitSha}: {})});
+  } catch { return res.status(503).json({error:'Documentation availability could not be checked. Please retry.'}); }
+};
+export const reconcile=async(_req:Request,res:Response)=>{
+  try { const dispatched=await dispatchPending(32); return res.json({success:true,dispatched}); }
+  catch { return res.status(503).json({error:'Reconciliation is temporarily unavailable; retry the signed delivery.'}); }
+};
+export const pipelineStep=async(req:Request,res:Response)=>{
+  if (!validDelivery(req.body)) return res.status(400).json({error:'A valid runId and expectedPhase are required, with sectionIndex only for sections.'});
+  try { return res.json(await executeNextStep(req.body)); }
+  catch(error) {
+    if (error instanceof DeliveryBusyError) return res.status(503).json({error:'The step is owned by another worker. Retry this delivery.'});
+    return res.status(503).json({error:'The step could not finish. Its durable state is retained for retry.'});
   }
 };
-
-export const getStatusByName = async (req: Request, res: Response) => {
+export const pipelineFailure=async(req:Request,res:Response)=>{
   try {
-    const { owner, repo } = req.query as { owner?: string; repo?: string };
-    if (!owner || !repo) return res.status(400).json({ error: 'Missing owner or repo' });
-
-    const verification = await verifyRepoExists(owner, repo);
-    if (!verification.exists) {
-      return res.status(404).json({ error: verification.error ? `GitHub verification failed: ${verification.error}` : "Repository not found on GitHub." });
-    }
-
-    const docsRepoOwner = process.env.DOCS_REPO_OWNER || process.env.GITHUB_USERNAME || "";
-    if (!docsRepoOwner) {
-      return res.status(500).json({ error: "Server configuration error: missing GitHub owner" });
-    }
-    const docsRepo = process.env.DOCS_REPO_NAME || 'gitdex-docs';
-
-    const job = await queue.getJobByRepo(owner, repo);
-    const lastIndexedKey = `last_indexed:${owner}/${repo}`;
-
-    if (job && (job.state === 'processing' || job.state === 'queued')) {
-      const cached = await redis.get<string>(lastIndexedKey);
-      const { data: _data, ...safeJob } = job;
-      return res.json({
-        indexed: false,
-        job: safeJob,
-        lastIndexed: cached ? parseInt(cached) : null,
-      });
-    }
-
-    let lastIndexed: number | null = null;
-    const cached = await redis.get<string>(lastIndexedKey);
-    if (cached) {
-      lastIndexed = parseInt(cached);
-    } else {
-      try {
-        await octokit.rest.repos.getContent({
-          owner: docsRepoOwner,
-          repo: docsRepo,
-          path: `docs/${owner}/${repo}/meta.json`,
-        });
-        const commits = await octokit.rest.repos.listCommits({
-          owner: docsRepoOwner,
-          repo: docsRepo,
-          path: `docs/${owner}/${repo}/meta.json`,
-          per_page: 1,
-        });
-        const commitDate = commits.data[0]?.commit.committer?.date;
-        if (commitDate) {
-          lastIndexed = new Date(commitDate).getTime();
-          await redis.set(lastIndexedKey, lastIndexed.toString());
-        }
-      } catch {
-        // 404 = not indexed, or GitHub unreachable
-      }
-    }
-
-    if (lastIndexed !== null) {
-      return res.json({
-        indexed: true,
-        path: `/${owner}/${repo}`,
-        lastIndexed,
-        job: job ? { id: job.id, state: job.state, updatedAt: job.updatedAt } : null,
-      });
-    }
-
-    if (job) {
-      const { data: _data, ...safeJob } = job;
-      return res.json({ indexed: false, job: safeJob });
-    }
-
-    return res.json({ indexed: false });
-  } catch (error: unknown) {
-    console.error('getStatusByName error', error);
-    return res.status(500).json({ error: 'Internal server error' });
-  }
-};
-
-export const cronHeal = async (req: Request, res: Response) => {
-  try {
-    await queue.healStuckJobs();
-    return res.json({ success: true });
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error("Cron healing failed:", message);
-    return res.status(500).json({ error: message });
-  }
+    const terminal=await handleFailureCallback(req.body);
+    if (!terminal) return res.status(503).json({error:'The step still has an active lease. Retry the failure callback.'});
+    await dispatchPending();
+    return res.json({outcome:'terminal-or-obsolete'});
+  } catch { return res.status(503).json({error:'Failure callback could not be reconciled. Retry the signed delivery.'}); }
 };
