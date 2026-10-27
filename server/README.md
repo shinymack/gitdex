@@ -33,9 +33,7 @@ Optional `GITHUB_SOURCE_TOKEN` is a separate public-source credential for higher
 - `POST /api/chat`: `x-github-owner` / `x-github-repo` headers and AI SDK UI messages. Source is pinned to one commit per request. The assistant uses native `listFiles`, `readFiles`, and `searchCode` tools; it has read/search limits, cancellation, and a total `CHAT_TIMEOUT_MS` deadline (default 90000, capped at 180000).
 - Signed `POST /api/pipeline/step`, `/api/pipeline/reconcile`, and `/api/pipeline/failure`. Signature verification binds both raw body and the canonical destination URL. Unsigned callbacks are not accepted.
 
-Gemma requests use native `generateContent` tool calls, with minimal thinking to fit interactive deadlines. The UI stream reports actual completed tool steps and then the complete answer; it does not simulate token streaming. Both configured models returned HTTP 500 on `streamGenerateContent` during release verification.
-
-Chat remains configured for Gemma only. A production source-reading answer with an immutable citation was verified, but other requests returned upstream 503/500. No Gemini or potentially billed fallback is enabled. Provider failures are shown as errors, not fabricated answers; generation and published guides remain independent of chat availability.
+Gemma requests use native `streamText` tool calls with minimal thinking to fit interactive deadlines. Tool steps and token deltas stream incrementally to the client as they arrive in real time.
 
 Development administration is absent in production. In development it also requires `DEV_ADMIN_TOKEN`; destructive documentation administration additionally requires `DOCS_ALLOW_DESTRUCTIVE_DEV=true`.
 

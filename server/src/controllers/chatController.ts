@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 import { google } from '@ai-sdk/google';
-import { APICallError, createUIMessageStream, pipeUIMessageStreamToResponse, generateText, tool, stepCountIs, convertToModelMessages, safeValidateUIMessages } from 'ai';
+import { APICallError, createUIMessageStream, pipeUIMessageStreamToResponse, streamText, tool, stepCountIs, convertToModelMessages, safeValidateUIMessages } from 'ai';
 import { z } from 'zod';
 import { publicOctokit } from '../config/octokit.js';
 import { getPublicRepository, readPublicFile } from '../services/repositoryAccess.js';
@@ -58,26 +58,13 @@ export async function handleChat(req: Request, res: Response): Promise<void> {
             if (signal.aborted) break;
             const candidateSignal = modelId === models.at(-1) ? signal : AbortSignal.any([signal, AbortSignal.timeout(Math.max(10000, Math.floor(timeout / Math.max(1, models.length))))]);
             try {
-              // Gemma's generateContent endpoint supports native tools; its SSE endpoint returns 500s.
-              const result = await generateText({
+              const result = streamText({
                 model: google(modelId), system, messages, maxRetries: 0,
                 abortSignal: candidateSignal,
                 maxOutputTokens: 5000,
                 providerOptions: { google: { thinkingConfig: { thinkingLevel: 'minimal' } } },
                 stopWhen: stepCountIs(6),
                 prepareStep: async () => { await acquireModelSlot(modelId, candidateSignal); return {}; },
-                onStepFinish: step => {
-                  for (const part of step.content) {
-                    if (part.type === 'tool-call') {
-                      emitted = true;
-                      writer.write({ type: 'tool-input-available', toolCallId: part.toolCallId, toolName: part.toolName, input: part.input });
-                    } else if (part.type === 'tool-result') {
-                      writer.write({ type: 'tool-output-available', toolCallId: part.toolCallId, output: part.output });
-                    } else if (part.type === 'tool-error') {
-                      writer.write({ type: 'tool-output-error', toolCallId: part.toolCallId, errorText: 'This source tool could not finish. Try a more focused question.' });
-                    }
-                  }
-                },
                 tools: {
                   listFiles: tool({
                     description: 'List actual source paths in a directory at the selected commit.',
@@ -131,12 +118,14 @@ export async function handleChat(req: Request, res: Response): Promise<void> {
                   }),
                 },
               });
-              if (!result.text.trim()) throw new Error('The model returned no final answer.');
-              const textId = crypto.randomUUID();
-              writer.write({ type: 'text-start', id: textId });
-              writer.write({ type: 'text-delta', id: textId, delta: result.text });
-              writer.write({ type: 'text-end', id: textId });
-              emitted = true;
+              for await (const chunk of result.toUIMessageStream({ sendStart: false, sendFinish: false })) {
+                if (chunk.type === 'error' || chunk.type === 'abort') throw new Error('Model stream interrupted.');
+                writer.write(chunk);
+                if (chunk.type === 'text-delta' || chunk.type === 'tool-input-available' || chunk.type === 'tool-output-available') {
+                  emitted = true;
+                }
+              }
+              if (!emitted || !(await result.text).trim()) throw new Error('The model returned no final answer.');
               completed = true;
               break;
             } catch (error) {
