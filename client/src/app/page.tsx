@@ -103,7 +103,7 @@ export default function HomePage() {
       } catch {
         if (!controller.signal.aborted) setSearchState('error');
       }
-    }, 250);
+    }, 350);
     return () => {
       clearTimeout(timer);
       controller.abort();
@@ -224,7 +224,7 @@ export default function HomePage() {
                 }}>
                   <div className={styles.repoControl}>
                     <Search aria-hidden="true" />
-                    <input ref={inputRef} id="repository-input" name="repository" type="text" autoComplete="off" autoCapitalize="none" spellCheck={false} placeholder="github.com/owner/repository" value={query} disabled={opening} role="combobox" aria-autocomplete="list" aria-expanded={popupOpen && suggestions.length > 0} aria-controls="repository-suggestions" aria-activedescendant={popupOpen && activeSuggestion >= 0 ? `repository-option-${activeSuggestion}` : undefined} aria-describedby={`repository-help${error ? ' repository-error' : ''}`} aria-invalid={Boolean(error)} onKeyDown={handleSuggestionKey} onFocus={() => setShowSuggestions(true)} onChange={(event) => {
+                    <input ref={inputRef} id="repository-input" name="repository" type="text" autoComplete="off" autoCapitalize="none" spellCheck={false} placeholder="owner/repo" value={query} disabled={opening} role="combobox" aria-autocomplete="list" aria-expanded={popupOpen && suggestions.length > 0} aria-controls="repository-suggestions" aria-activedescendant={popupOpen && activeSuggestion >= 0 ? `repository-option-${activeSuggestion}` : undefined} aria-describedby={`repository-help${error ? ' repository-error' : ''}`} aria-invalid={Boolean(error)} onKeyDown={handleSuggestionKey} onFocus={() => setShowSuggestions(true)} onChange={(event) => {
                       setQuery(event.target.value);
                       setSuggestions([]);
                       setActiveSuggestion(-1);
