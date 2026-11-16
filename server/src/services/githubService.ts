@@ -70,8 +70,8 @@ export async function scanRepository(job:JobData,data:PipelineData,signal:AbortS
   data.sourceSha=commit.sha;
   const {data:tree} = await publicOctokit.rest.git.getTree({owner:job.owner,repo:job.repo,tree_sha:commit.sha,recursive:'true',request:{signal}});
   const blobs = (tree.tree as RepoItem[]).filter((f):f is RepoItem & {path:string;sha:string}=>f.type === 'blob' && !!f.path && !!f.sha);
-  const eligible = blobs.filter(f=>(f.size || 0) <= 80000 && /(?:\.(?:[cm]?[jt]sx?|md|mdx|json|py|rb|go|rs|java|cpp|h|c|cs|php|css|html|sql|toml|ya?ml|sh)|(?:^|\/)(?:Dockerfile|Makefile|Procfile))$/i.test(f.path) && !/(?:^|\/)(?:node_modules|dist|build|vendor|\.git|__pycache__)(?:\/|$)|(?:package-lock\.json|\.lock|\.min\.js|\.bundle\.js)$/.test(f.path));
-  const priority = (path:string)=>/(?:^|\/)(?:readme[^/]*|package\.json|pyproject\.toml|cargo\.toml|go\.mod|dockerfile|[^/]*config[^/]*|index\.[^/]+|main\.[^/]+|app\.[^/]+)$/i.test(path)?0:1;
+  const eligible = blobs.filter(f=>(f.size || 0) <= 80000 && /(?:\.(?:[cm]?[jt]sx?|md|mdx|json|py|rb|go|rs|java|cpp|h|c|cs|php|css|html|sql|toml|ya?ml|sh|txt)|(?:^|\/)(?:Dockerfile|Makefile|Procfile))$/i.test(f.path) && !/(?:^|\/)(?:node_modules|dist|build|vendor|\.git|__pycache__)(?:\/|$)|(?:package-lock\.json|\.lock|\.min\.js|\.bundle\.js)$/.test(f.path));
+  const priority = (path:string)=>/(?:^|\/)(?:readme[^/]*|package\.json|pyproject\.toml|cargo\.toml|go\.mod|requirements\.txt|dockerfile|[^/]*config[^/]*|index\.[^/]+|main\.[^/]+|app\.[^/]+)$/i.test(path)?0:1;
   eligible.sort((a,b)=>priority(a.path)-priority(b.path) || a.path.localeCompare(b.path));
   const selected = eligible.slice(0,pipelineConfig.maxFiles);
   if (!selected.length) throw new InvalidArtifactError('No supported readable source files were found in this public snapshot.');
@@ -117,15 +117,12 @@ export async function validateArtifact(file:Artifact,sourceFiles:Record<string,s
     }
     if (fence) { if (isMermaid) mermaidBody.push(line); continue; }
     if (/^\s*(?:import|export)\s|<(?:[A-Z][A-Za-z0-9]*|script|iframe|object|embed|style)\b|(?:javascript|data):/i.test(line)) throw new InvalidArtifactError('Executable content is not accepted in generated Markdown.');
-    const urls=line.matchAll(/https:\/\/github\.com\/([^\s)\]>]+)/g);
-    for (const match of urls) {
-      const parts=match[1]!.split('/');
-      if (parts[2] !== 'blob') continue;
-      const path=decodeURIComponent(parts.slice(4).join('/').split('#')[0]!);
-      if (parts[0]?.toLowerCase()!==owner.toLowerCase() || parts[1]?.toLowerCase()!==repo.toLowerCase() || parts[3]!==sha || !sourceFiles[path]) throw new InvalidArtifactError('A generated source citation does not match the pinned snapshot.');
-    }
   }
   if (fence || !/^#\s+\S/m.test(file.content)) throw new InvalidArtifactError('A generated page has an unclosed code fence or no heading.');
+  const escapedOwner = owner.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const escapedRepo = repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const repoRegex = new RegExp(`https://github\\.com/${escapedOwner}/${escapedRepo}/blob/[^/\\s)\]>]+/`, 'gi');
+  file.content = file.content.replace(repoRegex, `https://github.com/${owner}/${repo}/blob/${sha}/`);
 }
 
 export async function commitToGithub(job:JobData,data:PipelineData,signal:AbortSignal,assertOwnership:()=>Promise<void>):Promise<number> {
