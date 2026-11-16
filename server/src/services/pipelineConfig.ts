@@ -5,9 +5,12 @@ function integer(name: string, fallback: number, min: number, max: number): numb
   return value;
 }
 export const pipelineConfig = {
-  concurrency: integer('PIPELINE_CONCURRENCY', 4, 1, 8),
-  stepDelaySec: integer('PIPELINE_STEP_DELAY_SEC', 2, 1, 60),
-  throttleMs: integer('AI_THROTTLE_MS', 2000, 1, 60000),
+  concurrency: integer('PIPELINE_CONCURRENCY', 1, 1, 8),
+  stepDelaySec: integer('PIPELINE_STEP_DELAY_SEC', 5, 1, 60),
+  throttleMs: integer('AI_THROTTLE_MS', 4000, 1, 60000),
+  maxTpm: integer('AI_MAX_TPM', 16000, 1000, 2000000),
+  maxSectionChars: integer('PIPELINE_SECTION_MAX_CHARS', 16000, 1000, 100000),
+  backoff429Ms: integer('AI_BACKOFF_429_MS', 30000, 1000, 120000),
   workTimeoutMs: integer('PIPELINE_WORK_TIMEOUT_MS', 45000, 1000, 240000),
   functionLimitMs: integer('FUNCTION_MAX_DURATION_MS', 60000, 10000, 3600000),
   brokerLimitMs: integer('QSTASH_RESPONSE_TIMEOUT_MS', 60000, 10000, 900000),

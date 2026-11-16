@@ -51,6 +51,7 @@ export const pipelineStep=async(req:Request,res:Response)=>{
   try { return res.json(await executeNextStep(req.body)); }
   catch(error) {
     if (error instanceof DeliveryBusyError) return res.status(503).json({error:'The step is owned by another worker. Retry this delivery.'});
+    console.error('[PipelineStep Error]', error);
     return res.status(503).json({error:'The step could not finish. Its durable state is retained for retry.'});
   }
 };

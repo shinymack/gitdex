@@ -98,7 +98,8 @@ export async function scanRepository(job:JobData,data:PipelineData,signal:AbortS
 export async function validateArtifact(file:Artifact,sourceFiles:Record<string,string>,owner:string,repo:string,sha:string):Promise<void> {
   if (!safeFilename(file.filename) || typeof file.content !== 'string' || file.content.length<80 || file.content.length>180000 || file.content.includes('\0')) throw new InvalidArtifactError('A generated page is empty, oversized or has an unsafe filename.');
   let fence:string|null=null; let fenceLength=0; let mermaidBody:string[]=[]; let isMermaid=false;
-  for (const line of file.content.split('\n')) {
+  const cleanLines: string[] = [];
+  for (let line of file.content.split('\n')) {
     const marker=line.match(/^\s{0,3}(`{3,}|~{3,})(.*)$/);
     if (marker) {
       if (!fence) { fence=marker[1]![0]!; fenceLength=marker[1]!.length; isMermaid=marker[2]!.trim()==='mermaid'; mermaidBody=[]; }
@@ -113,11 +114,17 @@ export async function validateArtifact(file:Artifact,sourceFiles:Record<string,s
         }
         fence=null;
       }
+      cleanLines.push(line);
       continue;
     }
-    if (fence) { if (isMermaid) mermaidBody.push(line); continue; }
-    if (/^\s*(?:import|export)\s|<(?:[A-Z][A-Za-z0-9]*|script|iframe|object|embed|style)\b|(?:javascript|data):/i.test(line)) throw new InvalidArtifactError('Executable content is not accepted in generated Markdown.');
+    if (fence) { if (isMermaid) mermaidBody.push(line); cleanLines.push(line); continue; }
+    cleanLines.push(line
+      .replace(/<(script|iframe|object|embed|style)\b/gi, '&lt;$1')
+      .replace(/<([A-Z][A-Za-z0-9]*)/g, '&lt;$1')
+      .replace(/\b(javascript|data):/gi, '$1_disabled:')
+      .replace(/^(\s*)(import|export)\s/g, '$1`$2` '));
   }
+  file.content = cleanLines.join('\n');
   if (fence || !/^#\s+\S/m.test(file.content)) throw new InvalidArtifactError('A generated page has an unclosed code fence or no heading.');
   const escapedOwner = owner.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const escapedRepo = repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
